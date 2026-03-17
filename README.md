@@ -12,6 +12,25 @@ A Golang toolkit to extract Sudoku grids from screenshots and solve them via a f
 - **UPLOAD (Web AI Integration)**: Paste JSON strings directly from tools like ChatGPT or Gemini.
 - **Fluent Navigation**: Full keyboard support (0-9, Arrows, Backspace/Delete). Navigation works even on locked clue cells.
 
+## Screenshots
+### Desktop (Windows/Linux)
+| Startup | Image Selection | Image Preview |
+| :---: | :---: | :---: |
+| ![Startup](screenshots/windows_linux_build_startup.jpg) | ![Pick Image](screenshots/windows_linux_build_pick_sudoku_puzzle_image.jpg) | ![Render Image](screenshots/windows_linux_build_render_sudoku_puzzle_image.jpg) |
+
+| Importing | Auto Notes | Puzzle Solved |
+| :---: | :---: | :---: |
+| ![Importing](screenshots/windows_linux_build_importing_sudoku_puzzle_image.jpg) | ![Auto Notes](screenshots/windows_linux_build_auto_fill_candidates_for_all_grids.jpg) | ![Solved](screenshots/windows_linux_build_puzzle_solved.jpg) |
+
+### Android & Web AI Integration
+| Android Startup | JSON Upload | Rendered Grid |
+| :---: | :---: | :---: |
+| ![Android Startup](screenshots/android_apk_startup.jpg) | ![JSON Upload](screenshots/android_apk_upload_json_string.jpg) | ![Rendered](screenshots/android_apk_render_uploaded_json_string.jpg) |
+
+| AI Extraction (Gemini) |
+| :---: |
+| ![AI Extraction](screenshots/get_9x9_grid_digits_json_string_from_gemini.jpg) |
+
 ## Requirements
 - Go 1.21+
 - Fyne-cross (for multi-platform/Android builds)
