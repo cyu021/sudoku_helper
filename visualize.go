@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,9 +110,9 @@ func (r *cellRenderer) MinSize() fyne.Size {
 
 func (r *cellRenderer) Refresh() {
 	if r.cell.selected {
-		r.bg.FillColor = color.NRGBA{R: 80, G: 80, B: 200, A: 100}
-		r.bg.StrokeColor = color.NRGBA{R: 255, G: 255, B: 255, A: 200}
-		r.bg.StrokeWidth = 2
+		r.bg.FillColor = color.NRGBA{R: 80, G: 80, B: 200, A: 120} // Slightly more opaque for better visibility
+		r.bg.StrokeColor = color.Transparent
+		r.bg.StrokeWidth = 0
 	} else if r.cell.hovered {
 		r.bg.FillColor = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
 		r.bg.StrokeColor = color.NRGBA{R: 255, G: 255, B: 255, A: 100}
@@ -280,7 +281,11 @@ func main() {
 	if len(os.Args) >= 2 {
 		statusBinding.Set("Loaded " + os.Args[1])
 	} else {
-		statusBinding.Set("Empty Grid. Use IMPORT to load an image.")
+		if runtime.GOOS == "android" {
+			statusBinding.Set("Empty Grid. Use UPLOAD to load a JSON string.")
+		} else {
+			statusBinding.Set("Empty Grid. Use IMPORT to load an image.")
+		}
 	}
 	statusLabel := widget.NewLabelWithData(statusBinding)
 	statusLabel.Wrapping = fyne.TextWrapWord
@@ -665,6 +670,81 @@ func main() {
 		fd.Show()
 	}
 
+	uploadGrid := func() {
+		clearFailedCache()
+		entry := widget.NewMultiLineEntry()
+		entry.SetPlaceHolder("Paste JSON here: {\"grid\": [[...],[...],...]}")
+		// Removed non-existent SetMinVisibleRows
+
+		d := dialog.NewCustomConfirm("Upload JSON Grid", "UPLOAD", "CANCEL", container.NewPadded(entry), func(ok bool) {
+			if !ok || entry.Text == "" {
+				return
+			}
+
+			var sg SudokuGrid
+			if err := json.Unmarshal([]byte(entry.Text), &sg); err != nil {
+				statusBinding.Set("Upload Failed: Invalid JSON format")
+				return
+			}
+
+			if len(sg.Grid) != 9 {
+				statusBinding.Set("Upload Failed: Grid must have 9 rows")
+				return
+			}
+
+			// Validate structure and rules
+			var validationGrid [9][9]int
+			for r := 0; r < 9; r++ {
+				if len(sg.Grid[r]) != 9 {
+					statusBinding.Set(fmt.Sprintf("Upload Failed: Row %d must have 9 columns", r+1))
+					return
+				}
+				for c := 0; c < 9; c++ {
+					val := sg.Grid[r][c]
+					if val < 0 || val > 9 {
+						statusBinding.Set(fmt.Sprintf("Upload Failed: Invalid value %d at %d,%d", val, r+1, c+1))
+						return
+					}
+					validationGrid[r][c] = val
+				}
+			}
+
+			for r := 0; r < 9; r++ {
+				for c := 0; c < 9; c++ {
+					if validationGrid[r][c] > 0 {
+						temp := validationGrid[r][c]
+						validationGrid[r][c] = 0
+						if !isValidMove(validationGrid, r, c, temp) {
+							statusBinding.Set(fmt.Sprintf("Upload Failed: Rule violation at %d,%d", r+1, c+1))
+							return
+						}
+						validationGrid[r][c] = temp
+					}
+				}
+			}
+
+			fyne.Do(func() {
+				for r := 0; r < 9; r++ {
+					for c := 0; c < 9; c++ {
+						val := sg.Grid[r][c]
+						cells[r][c].val = val
+						cells[r][c].isLocked = (val > 0)
+						for i := 0; i < 9; i++ {
+							cells[r][c].notes[i] = false
+						}
+					}
+				}
+				baseName = "pasted_game"
+				saveFileName = "pasted_game_savegame.json"
+				bigGrid.Refresh()
+				statusBinding.Set("Successfully uploaded grid from pasted JSON")
+			})
+		}, myWindow)
+
+		d.Resize(fyne.NewSize(500, 400))
+		d.Show()
+	}
+
 	autoNotes := func() {
 		for r := 0; r < 9; r++ {
 			for c := 0; c < 9; c++ {
@@ -691,6 +771,7 @@ func main() {
 	}
 
 	importBtn := widget.NewButton("IMPORT", importImage)
+	uploadBtn := widget.NewButton("UPLOAD", uploadGrid)
 	saveBtn := widget.NewButton("SAVE", saveGame)
 	loadBtn := widget.NewButton("LOAD", loadGame)
 	autoBtn := widget.NewButton("AUTO NOTES", autoNotes)
@@ -709,7 +790,15 @@ func main() {
 		}
 	})
 
-	fileButtons := container.NewHBox(importBtn, saveBtn, loadBtn, autoBtn)
+	fileButtons := container.NewHBox()
+	if runtime.GOOS != "android" {
+		fileButtons.Add(importBtn)
+	}
+	fileButtons.Add(uploadBtn)
+	fileButtons.Add(saveBtn)
+	fileButtons.Add(loadBtn)
+	fileButtons.Add(autoBtn)
+
 	solverButtons := container.NewHBox(goldFingerBtn, resetBtn, modeBtn)
 
 	for r := 0; r < 9; r++ {
