@@ -3,16 +3,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"image/color"
 	"log"
-	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -31,9 +31,9 @@ type SudokuGrid struct {
 }
 
 type GameState struct {
-	Values [][]int     `json:"values"`
-	Locked [][]bool    `json:"locked"`
-	Notes  [][][9]bool `json:"notes"`
+	Values [9][9]int     `json:"values"`
+	Locked [9][9]bool    `json:"locked"`
+	Notes  [9][9][9]bool `json:"notes"`
 }
 
 type Cell struct {
@@ -143,24 +143,21 @@ func (c *Cell) Tapped(_ *fyne.PointEvent) {
 }
 
 func main() {
+	fmt.Println("Sudoku Helper starting...")
 	var initialGrid [][]int
 	var baseName string
 	var saveFileName string
 
 	parseGrid := func(raw []byte) [][]int {
-		jsonStr := string(raw)
-		gridIdx := strings.LastIndex(jsonStr, "\"grid\"")
-		if gridIdx == -1 {
+		str := string(raw)
+		// Improved regex to find the JSON block even inside markdown
+		re := regexp.MustCompile(`(?s)\{\s*"grid"\s*:\s*\[.*\]\s*\}`)
+		match := re.FindString(str)
+		if match == "" {
 			return nil
 		}
-		start := strings.LastIndex(jsonStr[:gridIdx], "{")
-		end := strings.Index(jsonStr[gridIdx:], "}")
-		if start == -1 || end == -1 {
-			return nil
-		}
-		jsonStr = jsonStr[start : gridIdx+end+1]
 		var sg SudokuGrid
-		if err := json.Unmarshal([]byte(jsonStr), &sg); err != nil {
+		if err := json.Unmarshal([]byte(match), &sg); err != nil {
 			return nil
 		}
 		return sg.Grid
@@ -265,13 +262,12 @@ func main() {
 	statusLabel.Wrapping = fyne.TextWrapWord
 
 	// Solver variables
-	failedNumbers := make(map[string][]int)
 	solverStop := make(chan struct{})
 	solverRunning := false
 	var solverMutex sync.Mutex
 
 	clearFailedCache := func() {
-		failedNumbers = make(map[string][]int)
+		// Cache no longer used in recursive version
 	}
 
 	goldFinger := func() {
@@ -283,6 +279,23 @@ func main() {
 		solverRunning = true
 		solverStop = make(chan struct{})
 		solverMutex.Unlock()
+
+		// Capture state SYNCHRONOUSLY to avoid race conditions
+		initialVals := [9][9]int{}
+		fmt.Println("--- Gold Finger Initial Grid ---")
+		for r := 0; r < 9; r++ {
+			for c := 0; c < 9; c++ {
+				initialVals[r][c] = cells[r][c].val
+				fmt.Printf("%d ", initialVals[r][c])
+				if c == 2 || c == 5 {
+					fmt.Print("| ")
+				}
+			}
+			fmt.Println()
+			if r == 2 || r == 5 {
+				fmt.Println("------+-------+------")
+			}
+		}
 
 		go func() {
 			defer func() {
@@ -300,266 +313,149 @@ func main() {
 				notes [9][9][9]bool
 			}
 
-			applyAutoNotes := func(state *boardState) {
-				for r := 0; r < 9; r++ {
-					for c := 0; c < 9; c++ {
-						if state.vals[r][c] == 0 {
-							for n := 0; n < 9; n++ {
-								state.notes[r][c][n] = isValidMove(state.vals, r, c, n+1)
+			// Initialize state
+			initialState := boardState{vals: initialVals}
+			for r := 0; r < 9; r++ {
+				for c := 0; c < 9; c++ {
+					for n := 0; n < 9; n++ {
+						initialState.notes[r][c][n] = true
+					}
+				}
+			}
+
+			// Validate and Propagate Initial Grid
+			for r := 0; r < 9; r++ {
+				for c := 0; c < 9; c++ {
+					val := initialState.vals[r][c]
+					if val > 0 {
+						// Check for immediate conflicts
+						for i := 0; i < 9; i++ {
+							if i != c && initialState.vals[r][i] == val {
+								fmt.Printf("CONFLICT: Row %d, Col %d and %d both have %d\n", r+1, c+1, i+1, val)
+								fyne.Do(func() { statusBinding.Set(fmt.Sprintf("Conflict in Row %d", r+1)) })
+								return
+							}
+							if i != r && initialState.vals[i][c] == val {
+								fmt.Printf("CONFLICT: Col %d, Row %d and %d both have %d\n", c+1, r+1, i+1, val)
+								fyne.Do(func() { statusBinding.Set(fmt.Sprintf("Conflict in Col %d", c+1)) })
+								return
+							}
+						}
+						sr, sc := (r/3)*3, (c/3)*3
+						for i := 0; i < 3; i++ {
+							for j := 0; j < 3; j++ {
+								tr, tc := sr+i, sc+j
+								if (tr != r || tc != c) && initialState.vals[tr][tc] == val {
+									fmt.Printf("CONFLICT: 3x3 Block at %d,%d and %d,%d both have %d\n", r+1, c+1, tr+1, tc+1, val)
+									fyne.Do(func() { statusBinding.Set("Conflict in 3x3 Block") })
+									return
+								}
+							}
+						}
+
+						// Propagate
+						for i := 0; i < 9; i++ {
+							initialState.notes[r][i][val-1] = false
+							initialState.notes[i][c][val-1] = false
+						}
+						for i := 0; i < 3; i++ {
+							for j := 0; j < 3; j++ {
+								initialState.notes[sr+i][sc+j][val-1] = false
 							}
 						}
 					}
 				}
 			}
 
-			checkFailure := func(state *boardState) (bool, bool) {
-				for r := 0; r < 9; r++ {
-					seen := make(map[int]bool)
-					for c := 0; c < 9; c++ {
-						if state.vals[r][c] == 0 {
-							cnt, last := 0, -1
-							for n := 0; n < 9; n++ {
-								if state.notes[r][c][n] {
-									cnt++
-									last = n
-								}
-							}
-							if cnt == 1 {
-								if seen[last] {
-									return true, false
-								}
-								seen[last] = true
-							}
-						}
+			// Propagation function for recursion
+			var propagate func(state *boardState, r, c, val int)
+			propagate = func(state *boardState, r, c, val int) {
+				state.vals[r][c] = val
+				for i := 0; i < 9; i++ {
+					state.notes[r][i][val-1] = false
+					state.notes[i][c][val-1] = false
+				}
+				sr, sc := (r/3)*3, (c/3)*3
+				for i := 0; i < 3; i++ {
+					for j := 0; j < 3; j++ {
+						state.notes[sr+i][sc+j][val-1] = false
 					}
 				}
-				for c := 0; c < 9; c++ {
-					seen := make(map[int]bool)
-					for r := 0; r < 9; r++ {
-						if state.vals[r][c] == 0 {
-							cnt, last := 0, -1
-							for n := 0; n < 9; n++ {
-								if state.notes[r][c][n] {
-									cnt++
-									last = n
-								}
-							}
-							if cnt == 1 {
-								if seen[last] {
-									return true, false
-								}
-								seen[last] = true
-							}
-						}
-					}
+			}
+
+			var solveRecursive func(state boardState) (bool, [9][9]int)
+			solveRecursive = func(state boardState) (bool, [9][9]int) {
+				select {
+				case <-solverStop:
+					return false, [9][9]int{}
+				default:
 				}
-				for br := 0; br < 3; br++ {
-					for bc := 0; bc < 3; bc++ {
-						seen := make(map[int]bool)
-						for i := 0; i < 3; i++ {
-							for j := 0; j < 3; j++ {
-								r, c := br*3+i, bc*3+j
-								if state.vals[r][c] == 0 {
-									cnt, last := 0, -1
-									for n := 0; n < 9; n++ {
-										if state.notes[r][c][n] {
-											cnt++
-											last = n
-										}
-									}
-									if cnt == 1 {
-										if seen[last] {
-											return true, false
-										}
-										seen[last] = true
-									}
-								}
-							}
-						}
-					}
-				}
-				for r := 0; r < 9; r++ {
-					for c := 0; c < 9; c++ {
-						if state.vals[r][c] == 0 {
+
+				// Find MRV cell
+				r, c := -1, -1
+				minNotes := 10
+				allFilled := true
+
+				for row := 0; row < 9; row++ {
+					for col := 0; col < 9; col++ {
+						if state.vals[row][col] == 0 {
+							allFilled = false
 							cnt := 0
 							for n := 0; n < 9; n++ {
-								if state.notes[r][c][n] {
+								if state.notes[row][col][n] {
 									cnt++
 								}
 							}
 							if cnt == 0 {
-								return false, true
+								return false, [9][9]int{} // Dead end
+							}
+							if cnt < minNotes {
+								minNotes = cnt
+								r, c = row, col
 							}
 						}
 					}
 				}
-				return false, false
-			}
 
-			initialVals := [9][9]int{}
-			for r := 0; r < 9; r++ {
-				for c := 0; c < 9; c++ {
-					if cells[r][c].isLocked {
-						initialVals[r][c] = cells[r][c].val
+				if allFilled {
+					return true, state.vals
+				}
+
+				// Try candidates
+				for n := 0; n < 9; n++ {
+					if state.notes[r][c][n] {
+						nextState := state
+						propagate(&nextState, r, c, n+1)
+						success, result := solveRecursive(nextState)
+						if success {
+							return true, result
+						}
 					}
 				}
+
+				return false, [9][9]int{}
 			}
 
-			restarts := 0
-			rand.Seed(time.Now().UnixNano())
+			success, finalVals := solveRecursive(initialState)
 
-			for restarts < 100000 {
-				select {
-				case <-solverStop:
-					fyne.Do(func() {
-						statusBinding.Set("Gold Finger stopped.")
-					})
-					return
-				default:
-				}
-
-				state := boardState{vals: initialVals}
-				applyAutoNotes(&state)
-				history := []string{}
-
-				for {
-					allFilled := true
+			if success {
+				fyne.Do(func() {
 					for r := 0; r < 9; r++ {
 						for c := 0; c < 9; c++ {
-							if state.vals[r][c] == 0 {
-								allFilled = false
-								break
+							cells[r][c].val = finalVals[r][c]
+							for n := 0; n < 9; n++ {
+								cells[r][c].notes[n] = false
 							}
 						}
 					}
-					if allFilled {
-						finalVals := state.vals
-						finalRestarts := restarts
-						fyne.Do(func() {
-							for r := 0; r < 9; r++ {
-								for c := 0; c < 9; c++ {
-									cells[r][c].val = finalVals[r][c]
-									cells[r][c].notes = [9]bool{}
-								}
-							}
-							bigGrid.Refresh()
-							statusBinding.Set(fmt.Sprintf("Gold Finger Success! Restarts: %d", finalRestarts))
-						})
-						clearFailedCache()
-						return
-					}
-
-					// (1) Pick block with most known numbers
-					bestBlockR, bestBlockC := -1, -1
-					maxKnown := -1
-					for br := 0; br < 3; br++ {
-						for bc := 0; bc < 3; bc++ {
-							known := 0
-							for i := 0; i < 3; i++ {
-								for j := 0; j < 3; j++ {
-									if state.vals[br*3+i][bc*3+j] != 0 {
-										known++
-									}
-								}
-							}
-							if known < 9 && known > maxKnown {
-								maxKnown = known
-								bestBlockR, bestBlockC = br, bc
-							}
-						}
-					}
-
-					// (2) Pick grid with most pencil notes in that block
-					r, c := -1, -1
-					maxNotes := -1
-					for i := 0; i < 3; i++ {
-						for j := 0; j < 3; j++ {
-							tr, tc := bestBlockR*3+i, bestBlockC*3+j
-							if state.vals[tr][tc] == 0 {
-								cnt := 0
-								for n := 0; n < 9; n++ {
-									if state.notes[tr][tc][n] {
-										cnt++
-									}
-								}
-								if cnt > maxNotes {
-									maxNotes = cnt
-									r, c = tr, tc
-								}
-							}
-						}
-					}
-
-					ctx := strings.Join(history, "|")
-					key := fmt.Sprintf("%s|%d,%d", ctx, r, c)
-
-					var options []int
-					for n := 0; n < 9; n++ {
-						if state.notes[r][c][n] {
-							isFailed := false
-							for _, fn := range failedNumbers[key] {
-								if fn == n+1 {
-									isFailed = true
-									break
-								}
-							}
-							if !isFailed {
-								options = append(options, n+1)
-							}
-						}
-					}
-
-					if len(options) == 0 {
-						if len(history) > 0 {
-							lastCtx := strings.Join(history[:len(history)-1], "|")
-							parts := strings.Split(history[len(history)-1], ":")
-							failKey := lastCtx + "|" + parts[0]
-							lastVal, _ := strconv.Atoi(parts[1])
-							failedNumbers[failKey] = append(failedNumbers[failKey], lastVal)
-						}
-						break
-					}
-
-					val := options[rand.Intn(len(options))]
-					state.vals[r][c] = val
-					state.notes[r][c] = [9]bool{}
-					history = append(history, fmt.Sprintf("%d,%d:%d", r, c, val))
-
-					// Propagation
-					for i := 0; i < 9; i++ {
-						if i != c {
-							state.notes[r][i][val-1] = false
-						}
-						if i != r {
-							state.notes[i][c][val-1] = false
-						}
-					}
-					sr, sc := (r/3)*3, (c/3)*3
-					for i := 0; i < 3; i++ {
-						for j := 0; j < 3; j++ {
-							if sr+i != r || sc+j != c {
-								state.notes[sr+i][sc+j][val-1] = false
-							}
-						}
-					}
-
-					f42, f43 := checkFailure(&state)
-					if f42 || f43 {
-						failedNumbers[key] = append(failedNumbers[key], val)
-						break
-					}
-				}
-				restarts++
-				if restarts%1000 == 0 {
-					currentRestarts := restarts
-					fyne.Do(func() {
-						statusBinding.Set(fmt.Sprintf("Gold Finger Solving... (%d restarts)", currentRestarts))
-					})
-				}
+					bigGrid.Refresh()
+					statusBinding.Set("Gold Finger Success!")
+				})
+			} else {
+				fyne.Do(func() {
+					statusBinding.Set("Gold Finger failed: No solution found.")
+				})
 			}
-			fyne.Do(func() {
-				statusBinding.Set("Gold Finger failed.")
-			})
 		}()
 	}
 
@@ -596,9 +492,21 @@ func main() {
 			path := reader.URI().Path()
 			statusBinding.Set("Extracting from " + filepath.Base(path) + "...")
 
+			inputData, err := io.ReadAll(reader)
+			if err != nil {
+				statusBinding.Set("Import Failed: " + err.Error())
+				return
+			}
+
 			go func() {
-				importCmd := exec.Command("gemini", path, "Extract the 9x9 Sudoku grid from this image. Return ONLY a 2D array of integers in a JSON object with a 'grid' field, where 0 represents an empty cell. Do not include markdown code blocks or extra text.")
+				// Copy file to local directory to bypass Gemini CLI workspace restrictions
+				localPath := "import_temp" + filepath.Ext(path)
+				_ = os.WriteFile(localPath, inputData, 0644)
+				defer os.Remove(localPath)
+
+				importCmd := exec.Command("gemini", localPath, "ACT AS A SUDOKU SCANNER. Extract the 9x9 grid from this image. Return ONLY a JSON object: {\"grid\": [[...],[...],...]}. Zero (0) for empty cells. CRITICAL: Every row MUST have exactly 9 numbers. NO MARKDOWN. NO CHAT.")
 				output, err := importCmd.CombinedOutput()
+				fmt.Printf("--- RAW GEMINI OUTPUT ---\n%s\n-------------------------\n", string(output))
 				if err != nil {
 					fyne.Do(func() {
 						statusBinding.Set("Import Failed: " + err.Error())
@@ -612,6 +520,30 @@ func main() {
 						statusBinding.Set("Import Failed: Could not parse Gemini output")
 					})
 					return
+				}
+
+				// Validate the imported grid
+				var validationGrid [9][9]int
+				for r := 0; r < 9; r++ {
+					for c := 0; c < 9; c++ {
+						validationGrid[r][c] = newGrid[r][c]
+					}
+				}
+				for r := 0; r < 9; r++ {
+					for c := 0; c < 9; c++ {
+						if validationGrid[r][c] > 0 {
+							tempVal := validationGrid[r][c]
+							validationGrid[r][c] = 0 // Temporarily clear to check validity
+							if !isValidMove(validationGrid, r, c, tempVal) {
+								fyne.Do(func() {
+									statusBinding.Set(fmt.Sprintf("Import Error: Invalid grid at %d,%d", r+1, c+1))
+								})
+								fmt.Printf("ERROR: AI provided invalid grid value %d at %d,%d\n", tempVal, r, c)
+								return
+							}
+							validationGrid[r][c] = tempVal
+						}
+					}
 				}
 
 				newBaseName := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
@@ -635,21 +567,21 @@ func main() {
 				})
 			}()
 		}, myWindow)
+
+		// Set initial location to current directory to avoid C: root errors on Windows
+		cwd, _ := os.Getwd()
+		if l, err := storage.ListerForURI(storage.NewFileURI(cwd)); err == nil {
+			fd.SetLocation(l)
+		}
+
 		fd.SetFilter(storage.NewExtensionFileFilter([]string{".jpg", ".jpeg", ".png"}))
 		fd.Show()
 	}
 
 	saveGame := func() {
 		clearFailedCache()
-		state := GameState{
-			Values: make([][]int, 9),
-			Locked: make([][]bool, 9),
-			Notes:  make([][][9]bool, 9),
-		}
+		state := GameState{}
 		for r := 0; r < 9; r++ {
-			state.Values[r] = make([]int, 9)
-			state.Locked[r] = make([]bool, 9)
-			state.Notes[r] = make([][9]bool, 9)
 			for c := 0; c < 9; c++ {
 				state.Values[r][c] = cells[r][c].val
 				state.Locked[r][c] = cells[r][c].isLocked
@@ -670,7 +602,7 @@ func main() {
 			defer reader.Close()
 
 			path := reader.URI().Path()
-			data, err := os.ReadFile(path)
+			data, err := io.ReadAll(reader)
 			if err != nil {
 				statusBinding.Set("Failed to read " + filepath.Base(path))
 				return
@@ -682,20 +614,29 @@ func main() {
 				return
 			}
 
-			for r := 0; r < 9; r++ {
-				for c := 0; c < 9; c++ {
-					cells[r][c].val = state.Values[r][c]
-					cells[r][c].isLocked = state.Locked[r][c]
-					cells[r][c].notes = state.Notes[r][c]
+			fyne.Do(func() {
+				for r := 0; r < 9; r++ {
+					for c := 0; c < 9; c++ {
+						cells[r][c].val = state.Values[r][c]
+						cells[r][c].isLocked = state.Locked[r][c]
+						cells[r][c].notes = state.Notes[r][c]
+					}
 				}
-			}
 
-			baseName = strings.TrimSuffix(filepath.Base(path), "_savegame.json")
-			saveFileName = filepath.Base(path)
+				baseName = strings.TrimSuffix(filepath.Base(path), "_savegame.json")
+				saveFileName = filepath.Base(path)
 
-			bigGrid.Refresh()
-			statusBinding.Set("Loaded " + filepath.Base(path))
+				bigGrid.Refresh()
+				statusBinding.Set("Loaded " + filepath.Base(path))
+			})
 		}, myWindow)
+
+		// Set initial location to current directory to avoid C: root errors on Windows
+		cwd, _ := os.Getwd()
+		if l, err := storage.ListerForURI(storage.NewFileURI(cwd)); err == nil {
+			fd.SetLocation(l)
+		}
+
 		fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
 		fd.Show()
 	}
