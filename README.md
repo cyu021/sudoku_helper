@@ -18,18 +18,22 @@ A Golang toolkit to extract Sudoku grids from screenshots and solve them via a f
 | :---: | :---: | :---: |
 | ![Startup](screenshots/windows_linux_build_startup.jpg) | ![Pick Image](screenshots/windows_linux_build_pick_sudoku_puzzle_image.jpg) | ![Render Image](screenshots/windows_linux_build_render_sudoku_puzzle_image.jpg) |
 
-| Importing | Auto Notes | Puzzle Solved |
+| Importing | Auto Notes | Reset Board |
 | :---: | :---: | :---: |
-| ![Importing](screenshots/windows_linux_build_importing_sudoku_puzzle_image.jpg) | ![Auto Notes](screenshots/windows_linux_build_auto_fill_candidates_for_all_grids.jpg) | ![Solved](screenshots/windows_linux_build_puzzle_solved.jpg) |
+| ![Importing](screenshots/windows_linux_build_importing_sudoku_puzzle_image.jpg) | ![Auto Notes](screenshots/windows_linux_build_auto_fill_candidates_for_all_grids.jpg) | ![Reset](screenshots/windows_linux_build_reset_board_to_init.jpg) |
+
+| Puzzle Solved |
+| :---: |
+| ![Solved](screenshots/windows_linux_build_puzzle_solved.jpg) |
 
 ### Android & Web AI Integration
 | Android Startup | JSON Upload | Rendered Grid |
 | :---: | :---: | :---: |
 | ![Android Startup](screenshots/android_apk_startup.jpg) | ![JSON Upload](screenshots/android_apk_upload_json_string.jpg) | ![Rendered](screenshots/android_apk_render_uploaded_json_string.jpg) |
 
-| AI Extraction (Gemini) |
-| :---: |
-| ![AI Extraction](screenshots/get_9x9_grid_digits_json_string_from_gemini.jpg) |
+| AI Extraction (ChatGPT) | AI Extraction (Gemini) |
+| :---: | :---: |
+| ![ChatGPT](screenshots/get_9x9_grid_digits_json_string_from_chatgpt.jpg) | ![Gemini](screenshots/get_9x9_grid_digits_json_string_from_gemini.jpg) |
 
 ## Requirements
 - Go 1.21+
