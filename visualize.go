@@ -20,6 +20,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/data/binding"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
@@ -44,6 +45,7 @@ type Cell struct {
 	isLocked bool
 	onSelect func(r, c int)
 	selected bool
+	hovered  bool
 }
 
 func NewCell(r, c, val int, isLocked bool, onSelect func(r, c int)) *Cell {
@@ -53,8 +55,9 @@ func NewCell(r, c, val int, isLocked bool, onSelect func(r, c int)) *Cell {
 }
 
 func (c *Cell) CreateRenderer() fyne.WidgetRenderer {
-	bg := canvas.NewRectangle(color.Transparent)
-	bg.StrokeColor = color.NRGBA{R: 255, G: 255, B: 255, A: 40}
+	// Use a color that is almost transparent but still hit-testable
+	bg := canvas.NewRectangle(color.NRGBA{0, 0, 0, 1})
+	bg.StrokeColor = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
 	bg.StrokeWidth = 1
 
 	mainText := canvas.NewText("", color.White)
@@ -92,29 +95,37 @@ type cellRenderer struct {
 func (r *cellRenderer) Layout(size fyne.Size) {
 	r.bg.Resize(size)
 	r.mainText.Resize(size)
-	r.mainText.TextSize = size.Height * 0.6
+	r.mainText.TextSize = size.Height * 0.7
 	r.noteContainer.Resize(size)
-	noteSize := size.Height * 0.2
+	noteSize := size.Height * 0.22
 	for _, t := range r.noteTexts {
 		t.TextSize = noteSize
 	}
 }
 
 func (r *cellRenderer) MinSize() fyne.Size {
-	return fyne.NewSize(20, 20)
+	return fyne.NewSize(30, 30) // Slightly larger min size
 }
 
 func (r *cellRenderer) Refresh() {
 	if r.cell.selected {
-		r.bg.FillColor = color.NRGBA{R: 100, G: 100, B: 255, A: 60}
+		r.bg.FillColor = color.NRGBA{R: 80, G: 80, B: 200, A: 100}
+		r.bg.StrokeColor = color.NRGBA{R: 255, G: 255, B: 255, A: 200}
+		r.bg.StrokeWidth = 2
+	} else if r.cell.hovered {
+		r.bg.FillColor = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
+		r.bg.StrokeColor = color.NRGBA{R: 255, G: 255, B: 255, A: 100}
+		r.bg.StrokeWidth = 1
 	} else {
-		r.bg.FillColor = color.Transparent
+		r.bg.FillColor = color.NRGBA{0, 0, 0, 1} // Almost transparent but solid for hit-testing
+		r.bg.StrokeColor = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
+		r.bg.StrokeWidth = 1
 	}
 
 	if r.cell.val > 0 {
 		r.mainText.Text = strconv.Itoa(r.cell.val)
 		if r.cell.isLocked {
-			r.mainText.Color = color.NRGBA{R: 255, G: 215, B: 0, A: 255}
+			r.mainText.Color = color.NRGBA{R: 255, G: 215, B: 0, A: 255} // Gold for clues
 			r.mainText.TextStyle = fyne.TextStyle{Bold: true}
 		} else {
 			r.mainText.Color = color.White
@@ -133,6 +144,7 @@ func (r *cellRenderer) Refresh() {
 			}
 		}
 	}
+	r.bg.Refresh()
 }
 
 func (r *cellRenderer) Objects() []fyne.CanvasObject { return r.objects }
@@ -141,6 +153,18 @@ func (r *cellRenderer) Destroy()                     {}
 func (c *Cell) Tapped(_ *fyne.PointEvent) {
 	c.onSelect(c.row, c.col)
 }
+
+func (c *Cell) MouseIn(_ *desktop.MouseEvent) {
+	c.hovered = true
+	c.Refresh()
+}
+
+func (c *Cell) MouseOut() {
+	c.hovered = false
+	c.Refresh()
+}
+
+func (c *Cell) MouseMoved(_ *desktop.MouseEvent) {}
 
 func main() {
 	fmt.Println("Sudoku Helper starting...")
@@ -673,8 +697,20 @@ func main() {
 	goldFingerBtn := widget.NewButton("GOLD FINGER", goldFinger)
 	resetBtn := widget.NewButton("RESET", stopGoldFinger)
 
+	var modeBtn *widget.Button
+	modeBtn = widget.NewButton("NORMAL", func() {
+		noteMode = !noteMode
+		if noteMode {
+			modeBtn.SetText("NOTES")
+			statusBinding.Set("Mode: NOTES")
+		} else {
+			modeBtn.SetText("NORMAL")
+			statusBinding.Set("Mode: NORMAL")
+		}
+	})
+
 	fileButtons := container.NewHBox(importBtn, saveBtn, loadBtn, autoBtn)
-	solverButtons := container.NewHBox(goldFingerBtn, resetBtn)
+	solverButtons := container.NewHBox(goldFingerBtn, resetBtn, modeBtn)
 
 	for r := 0; r < 9; r++ {
 		for c := 0; c < 9; c++ {
@@ -767,8 +803,10 @@ func main() {
 			noteMode = !noteMode
 			highlightBtn(-1)
 			if noteMode {
+				modeBtn.SetText("NOTES")
 				statusBinding.Set("Mode: NOTES (Press 'N' to toggle)")
 			} else {
+				modeBtn.SetText("NORMAL")
 				statusBinding.Set("Mode: NORMAL (Press 'N' to toggle)")
 			}
 			return
@@ -777,61 +815,32 @@ func main() {
 			return
 		}
 		cell := cells[selectedR][selectedC]
-		if cell.isLocked {
-			return
-		}
-		if k.Name >= "0" && k.Name <= "9" {
-			num, _ := strconv.Atoi(string(k.Name))
-			highlightBtn(num)
-			if num == 0 {
-				cell.val = 0
-				for i := 0; i < 9; i++ {
-					cell.notes[i] = false
-				}
-			} else {
-				var grid [9][9]int
-				for row := 0; row < 9; row++ {
-					for col := 0; col < 9; col++ {
-						grid[row][col] = cells[row][col].val
-					}
-				}
-				if isValidMove(grid, selectedR, selectedC, num) {
-					if noteMode {
-						cell.val = 0
-						cell.notes[num-1] = !cell.notes[num-1]
-					} else {
-						cell.val = num
-						for i := 0; i < 9; i++ {
-							cell.notes[i] = false
-						}
-						clearConflictingNotes(selectedR, selectedC, num)
-					}
-				}
-			}
-			cell.Refresh()
-		} else if k.Name == fyne.KeyBackspace || k.Name == fyne.KeyDelete {
-			highlightBtn(0)
-			cell.val = 0
-			for i := 0; i < 9; i++ {
-				cell.notes[i] = false
-			}
-			cell.Refresh()
-		} else if k.Name == fyne.KeyLeft {
+
+		// Navigation keys should work even on locked cells
+		if k.Name == fyne.KeyLeft {
 			if selectedC > 0 {
 				onSelect(selectedR, selectedC-1)
 			}
+			return
 		} else if k.Name == fyne.KeyRight {
 			if selectedC < 8 {
 				onSelect(selectedR, selectedC+1)
 			}
+			return
 		} else if k.Name == fyne.KeyUp {
 			if selectedR > 0 {
 				onSelect(selectedR-1, selectedC)
 			}
+			return
 		} else if k.Name == fyne.KeyDown {
 			if selectedR < 8 {
 				onSelect(selectedR+1, selectedC)
 			}
+			return
+		}
+
+		if cell.isLocked {
+			return
 		}
 	})
 
