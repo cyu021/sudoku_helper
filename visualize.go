@@ -618,8 +618,33 @@ func main() {
 			}
 		}
 		data, _ := json.Marshal(state)
-		os.WriteFile(saveFileName, data, 0644)
-		statusBinding.Set("Game Saved to " + saveFileName)
+
+		fd := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+			if err != nil || writer == nil {
+				return
+			}
+			defer writer.Close()
+
+			_, err = writer.Write(data)
+			if err != nil {
+				statusBinding.Set("Failed to save: " + err.Error())
+				return
+			}
+
+			path := writer.URI().Path()
+			saveFileName = filepath.Base(path)
+			baseName = strings.TrimSuffix(saveFileName, "_savegame.json")
+
+			statusBinding.Set("Game Saved to " + saveFileName)
+		}, myWindow)
+
+		cwd, _ := os.Getwd()
+		if l, err := storage.ListerForURI(storage.NewFileURI(cwd)); err == nil {
+			fd.SetLocation(l)
+		}
+		fd.SetFileName(saveFileName)
+		fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
+		fd.Show()
 	}
 
 	loadGame := func() {

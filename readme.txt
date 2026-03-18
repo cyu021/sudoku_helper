@@ -10,7 +10,7 @@ A Golang toolkit to extract Sudoku grids from screenshots and solve them via a f
 - **Automatic Notes**: Intelligent pencil-mark management based on Sudoku rules.
 - **Input Modes**: Toggle between **NORMAL** and **NOTES** (pencil marks) via a dedicated button or the **'N'** key.
 - **UPLOAD (Web AI Integration)**: Paste JSON strings directly from tools like ChatGPT or Gemini.
-- **Fluent Navigation**: Full keyboard support (0-9, Arrows, Backspace/Delete). Navigation works even on locked clue cells.
+- **Fluent Navigation**: Full keyboard support (0-9, Arrows, Backspace/Delete). Navigation works even on locked clue cells. Use **Escape** to deselect.
 
 ## Screenshots
 ### Desktop (Windows/Linux)
@@ -70,6 +70,7 @@ fyne-cross android --arch=arm64 --icon=Icon.png --name=SudokuHelper --app-id=com
 5. Toggle input mode using the **NORMAL/NOTES** button or press **'N'**.
 6. Use **Arrow Keys** to move across the board (including locked cells).
 7. Use **GOLD FINGER** for an instant solution.
+8. Use **SAVE/LOAD** to manage puzzle progress via a standard file picker.
 
 ## Troubleshooting
 - **Windows File Picker Logs:** You may see "Error getting file attributes" in the console when browsing the `C:` root. These are harmless library logs from Fyne and do not affect functionality.
