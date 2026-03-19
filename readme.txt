@@ -13,12 +13,14 @@ A Golang toolkit to extract Sudoku grids from screenshots and solve them via a f
   - **Mobile (Android):** A specialized **OVERWRITE** vs. **NEW FILE** workflow to bypass native Storage Access Framework (SAF) limitations, ensuring 100% reliable file replacement and clean, unescaped filenames.
 - **Advanced Visual Feedback**:
   - **Conflict Highlighting**: Conflicting cells flash red for 1 second when an invalid move is attempted.
-  - **Digit Scanning**: Select a digit (1-9) to highlight all occurrences on the board in light green. Highlights are "sticky" across edits.
+  - **Digit Scanning**: Select a digit (1-9) to highlight all occurrences on the board in vibrant light green (RGB: 39, 245, 63). 
+  - **Note Highlighting**: When a digit is scanned, corresponding pencil marks (notes) are also highlighted in bold light green for easier candidate tracking.
   - **Dynamic Input**: Digit buttons automatically disable and gray out when a number has been placed 9 times.
 - **Dual Interaction Modes**: 
   - **SELECT Mode**: Left-click to focus and select a cell.
   - **SET Mode**: Left-click to instantly "stamp" the currently highlighted digit into a cell.
 - **Power User Shortcuts**: 
+  - **Tap-to-Scan**: Tapping any filled cell on the grid (val > 0) automatically triggers digit scanning for that number, regardless of the click mode.
   - **Right-Click / Long-Press**: Instantly place the highlighted digit into a cell using the current mode (**NORMAL** or **NOTES**).
   - **Keyboard Support**: Full support for 0-9, Arrows, Backspace/Delete, and **'N'** to toggle input modes.
 - **Automatic Notes**: Intelligent pencil-mark management based on Sudoku rules via **AUTO NOTES**.
@@ -55,7 +57,7 @@ A Golang toolkit to extract Sudoku grids from screenshots and solve them via a f
 ## Build Instructions (via WSL/Linux)
 ### Linux (Native/WSL)
 ```bash
-go build -o sudoku_helper .
+go build -o SudokuHelper .
 ```
 
 ### Windows (via Fyne-cross)
@@ -82,7 +84,7 @@ fyne-cross android -app-id com.example.sudoku_helper -icon Icon.png -name Sudoku
 9. **Digit Scanning**: Click a digit button or press 1-9 while no cell is selected to highlight all instances of that number.
 10. **Click Modes**: 
    - Use **SELECT** mode for standard navigation.
-   - Use **SET** mode for rapid "one-tap" digit entry.
+   - Use **SET** mode for rapid "one-tap" digit entry into empty cells.
 11. **Shortcuts**: Use **Right-click** (or Long-press on mobile) to quickly stamp the highlighted digit into any grid.
 12. **Deselect**: Click any empty area outside the grid or in the control panel to clear selection and scanning highlights.
 

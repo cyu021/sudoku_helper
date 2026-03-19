@@ -7,12 +7,14 @@ A Golang toolkit to extract Sudoku grids from screenshots and solve them via a f
 - **Interactive GUI**: Built with Fyne, featuring a responsive, touch-friendly layout with hover effects and borderless selection.
 - **Advanced Visual Feedback**:
   - **Conflict Highlighting**: Conflicting cells flash red for 1 second when an invalid move is attempted.
-  - **Digit Scanning**: Select a digit (1-9) to highlight all occurrences on the board in light green. Highlights are "sticky" across edits.
+  - **Digit Scanning**: Select a digit (1-9) to highlight all occurrences on the board in vibrant light green (RGB: 39, 245, 63). 
+  - **Note Highlighting**: When a digit is scanned, corresponding pencil marks (notes) are also highlighted in bold light green for easier candidate tracking.
   - **Dynamic Input**: Digit buttons automatically disable and gray out when a number has been placed 9 times.
 - **Dual Interaction Modes**: 
   - **SELECT Mode**: Left-click to focus and select a cell for standard navigation.
-  - **SET Mode**: Left-click to instantly "stamp" the currently highlighted digit into a cell.
+  - **SET Mode**: Left-click to instantly "stamp" the currently highlighted digit into an empty cell.
 - **Power User Shortcuts**: 
+  - **Tap-to-Scan**: Tapping any filled cell on the grid (value > 0) automatically triggers digit scanning for that number, regardless of the active click mode.
   - **Right-Click / Long-Press**: Instantly place the highlighted digit into a cell using the current input mode (**NORMAL** or **NOTES**).
 - **High-Performance Grid**: Employs a 20-rectangle architecture for pixel-perfect alignment and artifact prevention. Debounced rendering ensures window responsiveness during resizing.
 - **Recursive MRV Solver**: A deterministic, instant AI solver using the Minimum Remaining Values (MRV) heuristic.
@@ -57,7 +59,7 @@ A Golang toolkit to extract Sudoku grids from screenshots and solve them via a f
 ## Build Instructions (via WSL/Linux)
 ### Linux (Native/WSL)
 ```bash
-go build -o sudoku_helper .
+go build -o SudokuHelper .
 ```
 
 ### Windows (via Fyne-cross)
@@ -82,11 +84,12 @@ fyne-cross android -app-id com.example.sudoku_helper -icon Icon.png -name Sudoku
 7. Use **Arrow Keys** to move across the board (including locked cells).
 8. Use **GOLD FINGER** for an instant solution.
 9. **Digit Scanning**: Click a digit button or press 1-9 while no cell is selected to highlight all instances of that number.
-10. **Click Modes**: 
+10. **Tap-to-Scan**: Tapping any cell that already contains a number will automatically trigger digit scanning for that number, regardless of the active click mode.
+11. **Click Modes**: 
    - Use **SELECT** mode for standard navigation.
-   - Use **SET** mode for rapid "one-tap" digit entry.
-11. **Shortcuts**: Use **Right-click** (or Long-press on mobile) to quickly stamp the highlighted digit into any grid cell.
-12. **Deselect**: Click any empty area outside the grid or in the control panel to clear selection and scanning highlights.
+   - Use **SET** mode for rapid "one-tap" digit entry into empty cells.
+12. **Shortcuts**: Use **Right-click** (or Long-press on mobile) to quickly stamp the highlighted digit into any grid cell.
+13. **Deselect**: Click any empty area outside the grid or in the control panel to clear selection and scanning highlights.
 
 ## Troubleshooting
 - **Right-click on Windows/Linux:** If the standard right-click is not responsive, ensure the cell is selected first or try a brief long-press.

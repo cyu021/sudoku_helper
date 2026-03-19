@@ -141,7 +141,7 @@ func (r *cellRenderer) Refresh() {
 		r.bg.StrokeColor = color.Transparent
 		r.bg.StrokeWidth = 0
 	} else if r.cell.isDigitHighlighted {
-		r.bg.FillColor = color.NRGBA{R: 144, G: 238, B: 144, A: 100} // Light green for digit highlight
+		r.bg.FillColor = color.NRGBA{R: 39, G: 245, B: 63, A: 100} // Light green for digit highlight
 		r.bg.StrokeColor = color.Transparent
 		r.bg.StrokeWidth = 0
 	} else if r.cell.hovered {
@@ -171,6 +171,14 @@ func (r *cellRenderer) Refresh() {
 		for i := 0; i < 9; i++ {
 			if r.cell.notes[i] {
 				r.noteTexts[i].Text = strconv.Itoa(i + 1)
+				// Highlight note if its digit is currently selected in scanning mode
+				if highlightedDigit == i+1 {
+					r.noteTexts[i].Color = color.NRGBA{R: 39, G: 245, B: 63, A: 255} // Light Green
+					r.noteTexts[i].TextStyle = fyne.TextStyle{Bold: true}
+				} else {
+					r.noteTexts[i].Color = color.NRGBA{R: 200, G: 200, B: 200, A: 255} // Standard Gray
+					r.noteTexts[i].TextStyle = fyne.TextStyle{}
+				}
 			} else {
 				r.noteTexts[i].Text = ""
 			}
@@ -183,10 +191,22 @@ func (r *cellRenderer) Objects() []fyne.CanvasObject { return r.objects }
 func (r *cellRenderer) Destroy()                     {}
 
 func (c *Cell) Tapped(ev *fyne.PointEvent) {
-	fmt.Printf("Cell Tapped at %d,%d, InteractionMode: %v\n", c.row, c.col, interactionMode)
+	fmt.Printf("Cell Tapped at %d,%d, InteractionMode: %v, Val: %d\n", c.row, c.col, interactionMode, c.val)
 	c.onSelect(c.row, c.col)
 	
-	if interactionMode && highlightedDigit > 0 && handleInput != nil {
+	if c.val > 0 {
+		// Mimic digit button behavior when no cell is selected (Toggle Scanning)
+		// regardless the click mode
+		num := c.val
+		if highlightedDigit == num {
+			updateDigitHighlights(-1)
+			highlightBtn(-1)
+		} else {
+			updateDigitHighlights(num)
+			highlightBtn(num)
+		}
+	} else if interactionMode && highlightedDigit > 0 && handleInput != nil {
+		// If in SET mode and tapping an empty cell, place the highlighted digit
 		handleInput(c.row, c.col, highlightedDigit, false)
 	}
 }
