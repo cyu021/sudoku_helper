@@ -1,8 +1,8 @@
 # Sudoku Helper
 
-A Golang toolkit to extract Sudoku grids from screenshots and solve them via a feature-rich, interactive GUI.
+A high-performance Golang toolkit for extracting Sudoku grids from screenshots and solving them via a feature-rich, interactive GUI. Built for Linux, Windows, and Android using the Fyne framework.
 
-## Features
+## Key Features
 - **AI Extraction**: Uses Gemini CLI (Gemini 3 models) to convert Sudoku screenshots into digital grids with high accuracy.
 - **Interactive GUI**: Built with Fyne, featuring a responsive, touch-friendly layout with hover effects and borderless selection.
 - **High-Performance Grid**: Employs a 20-rectangle architecture for pixel-perfect alignment and artifact prevention. Debounced rendering ensures window responsiveness during resizing.
@@ -11,14 +11,19 @@ A Golang toolkit to extract Sudoku grids from screenshots and solve them via a f
 - **Smart Save/Load**: 
   - **Desktop:** Standard file dialogs with pre-filled filenames for quick persistence.
   - **Mobile (Android):** A specialized **OVERWRITE** vs. **NEW FILE** workflow to bypass native Storage Access Framework (SAF) limitations, ensuring 100% reliable file replacement and clean, unescaped filenames.
+- **Raise Hand (Hint System)**: 
+  - Reveals the correct value for a selected cell or the next empty cell.
+  - **Pink Hinted Digits**: Hints are persistently rendered in **Bold Pink** (RGB: 255, 105, 180) to distinguish them from manual entries (White) and clues (Gold).
+  - **Yellow Hint Pulse**: The hinted cell flashes in **Light Yellow** (RGB: 255, 255, 100) for 1 second upon delivery.
+  - **Full Integration**: Hints trigger all collateral events (note clearing, scanning updates, and solved-checks).
 - **Advanced Visual Feedback**:
   - **Conflict Highlighting**: Conflicting cells flash red for 1 second when an invalid move is attempted.
-  - **Digit Scanning**: Select a digit (1-9) to highlight all occurrences on the board in vibrant light green (RGB: 39, 245, 63). 
+  - **Vibrant Digit Scanning**: Highlight all instances and candidates (notes) of a digit in vibrant **Light Green** (RGB: 39, 245, 63). Highlights are "sticky" across edits.
   - **Note Highlighting**: When a digit is scanned, corresponding pencil marks (notes) are also highlighted in bold light green for easier candidate tracking.
-  - **Dynamic Input**: Digit buttons automatically disable and gray out when a number has been placed 9 times.
+  - **Dynamic Input**: Digit buttons automatically disable when a number has been placed 9 times.
 - **Dual Interaction Modes**: 
-  - **SELECT Mode**: Left-click to focus and select a cell.
-  - **SET Mode**: Left-click to instantly "stamp" the currently highlighted digit into a cell.
+  - **SELECT Mode**: Standard navigation and cell focusing.
+  - **SET Mode**: One-tap "stamping" for rapid digit entry into empty cells.
 - **Power User Shortcuts**: 
   - **Tap-to-Scan**: Tapping any filled cell on the grid (val > 0) automatically triggers digit scanning for that number, regardless of the click mode.
   - **Right-Click / Long-Press**: Instantly place the highlighted digit into a cell using the current mode (**NORMAL** or **NOTES**).
@@ -81,12 +86,20 @@ fyne-cross android -app-id com.example.sudoku_helper -icon Icon.png -name Sudoku
 6. Toggle input mode using the **NORMAL/NOTES** button or press **'N'**.
 7. Use **Arrow Keys** to move across the board (including locked cells).
 8. Use **GOLD FINGER** for an instant solution.
-9. **Digit Scanning**: Click a digit button or press 1-9 while no cell is selected to highlight all instances of that number.
+9. **Scan**: Tap a digit button or any number on the board to see all placements and candidates in vibrant green.
 10. **Click Modes**: 
    - Use **SELECT** mode for standard navigation.
    - Use **SET** mode for rapid "one-tap" digit entry into empty cells.
 11. **Shortcuts**: Use **Right-click** (or Long-press on mobile) to quickly stamp the highlighted digit into any grid.
 12. **Deselect**: Click any empty area outside the grid or in the control panel to clear selection and scanning highlights.
+13. **Hints**: Use the **Raise Hand** (Help Icon) for a persistent pink hint with a yellow visual pulse.
+
+## Visual Guide
+- **Startup**: Clean dark theme with a 9x9 grid and compact control rows.
+- **Scanning Mode**: Grid cells and pencil marks glowing in vibrant green (39, 245, 63).
+- **Conflict**: Source and destination cells flashing red (255, 0, 0).
+- **Hinted Cell**: Digit rendered in pink (255, 105, 180) with a temporary yellow background (255, 255, 100).
+- **Clue Cells**: Initial puzzle numbers rendered in bold gold (255, 215, 0).
 
 
 ## Troubleshooting

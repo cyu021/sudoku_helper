@@ -50,6 +50,8 @@ type Cell struct {
 	selected           bool
 	hovered            bool
 	isConflicting      bool
+	isHinted           bool
+	isHintedPerm       bool
 	isDigitHighlighted bool
 }
 
@@ -59,6 +61,18 @@ func (c *Cell) ShowConflict() {
 	time.AfterFunc(time.Second, func() {
 		fyne.Do(func() {
 			c.isConflicting = false
+			c.Refresh()
+		})
+	})
+}
+
+func (c *Cell) ShowHint() {
+	c.isHinted = true
+	c.isHintedPerm = true
+	c.Refresh()
+	time.AfterFunc(time.Second, func() {
+		fyne.Do(func() {
+			c.isHinted = false
 			c.Refresh()
 		})
 	})
@@ -136,6 +150,10 @@ func (r *cellRenderer) Refresh() {
 		r.bg.FillColor = color.NRGBA{R: 255, G: 0, B: 0, A: 120} // Red background for errors
 		r.bg.StrokeColor = color.Transparent
 		r.bg.StrokeWidth = 0
+	} else if r.cell.isHinted {
+		r.bg.FillColor = color.NRGBA{R: 255, G: 255, B: 100, A: 120} // Light Yellow for hint
+		r.bg.StrokeColor = color.Transparent
+		r.bg.StrokeWidth = 0
 	} else if r.cell.selected {
 		r.bg.FillColor = color.NRGBA{R: 80, G: 80, B: 200, A: 120} // Blue background for selection
 		r.bg.StrokeColor = color.Transparent
@@ -158,6 +176,9 @@ func (r *cellRenderer) Refresh() {
 		r.mainText.Text = strconv.Itoa(r.cell.val)
 		if r.cell.isLocked {
 			r.mainText.Color = color.NRGBA{R: 255, G: 215, B: 0, A: 255} // Gold for clues
+			r.mainText.TextStyle = fyne.TextStyle{Bold: true}
+		} else if r.cell.isHintedPerm {
+			r.mainText.Color = color.NRGBA{R: 255, G: 105, B: 180, A: 255} // Pink for hinted digits
 			r.mainText.TextStyle = fyne.TextStyle{Bold: true}
 		} else {
 			r.mainText.Color = color.White
@@ -854,6 +875,77 @@ func main() {
 	solverRunning := false
 	var solverMutex sync.Mutex
 
+	// Sudoku Solver Internal State
+	type boardState struct {
+		vals  [9][9]int
+		notes [9][9][9]bool
+	}
+
+	propagate := func(state *boardState, r, c, val int) {
+		state.vals[r][c] = val
+		for i := 0; i < 9; i++ {
+			state.notes[r][i][val-1] = false
+			state.notes[i][c][val-1] = false
+		}
+		sr, sc := (r/3)*3, (c/3)*3
+		for i := 0; i < 3; i++ {
+			for j := 0; j < 3; j++ {
+				state.notes[sr+i][sc+j][val-1] = false
+			}
+		}
+	}
+
+	var solveRecursive func(state boardState, stop chan struct{}) (bool, [9][9]int)
+	solveRecursive = func(state boardState, stop chan struct{}) (bool, [9][9]int) {
+		select {
+		case <-stop:
+			return false, [9][9]int{}
+		default:
+		}
+
+		// Find MRV cell
+		r, c := -1, -1
+		minNotes := 10
+		allFilled := true
+
+		for row := 0; row < 9; row++ {
+			for col := 0; col < 9; col++ {
+				if state.vals[row][col] == 0 {
+					allFilled = false
+					cnt := 0
+					for n := 0; n < 9; n++ {
+						if state.notes[row][col][n] {
+							cnt++
+						}
+					}
+					if cnt == 0 {
+						return false, [9][9]int{} // Dead end
+					}
+					if cnt < minNotes {
+						minNotes = cnt
+						r, c = row, col
+					}
+				}
+			}
+		}
+
+		if allFilled {
+			return true, state.vals
+		}
+
+		// Try candidates
+		for n := 0; n < 9; n++ {
+			if state.notes[r][c][n] {
+				nextState := state
+				propagate(&nextState, r, c, n+1)
+				if ok, res := solveRecursive(nextState, stop); ok {
+					return true, res
+				}
+			}
+		}
+		return false, [9][9]int{}
+	}
+
 	clearFailedCache := func() {
 		// Cache no longer used in recursive version
 	}
@@ -870,18 +962,9 @@ func main() {
 
 		// Capture state SYNCHRONOUSLY to avoid race conditions
 		initialVals := [9][9]int{}
-		fmt.Println("--- Gold Finger Initial Grid ---")
 		for r := 0; r < 9; r++ {
 			for c := 0; c < 9; c++ {
 				initialVals[r][c] = board.cells[r][c].val
-				fmt.Printf("%d ", initialVals[r][c])
-				if c == 2 || c == 5 {
-					fmt.Print("| ")
-				}
-			}
-			fmt.Println()
-			if r == 2 || r == 5 {
-				fmt.Println("------+-------+------")
 			}
 		}
 
@@ -895,11 +978,6 @@ func main() {
 			fyne.Do(func() {
 				statusBinding.Set("Gold Finger is solving...")
 			})
-
-			type boardState struct {
-				vals  [9][9]int
-				notes [9][9][9]bool
-			}
 
 			// Initialize state
 			initialState := boardState{vals: initialVals}
@@ -919,12 +997,10 @@ func main() {
 						// Check for immediate conflicts
 						for i := 0; i < 9; i++ {
 							if i != c && initialState.vals[r][i] == val {
-								fmt.Printf("CONFLICT: Row %d, Col %d and %d both have %d\n", r+1, c+1, i+1, val)
 								fyne.Do(func() { statusBinding.Set(fmt.Sprintf("Conflict in Row %d", r+1)) })
 								return
 							}
 							if i != r && initialState.vals[i][c] == val {
-								fmt.Printf("CONFLICT: Col %d, Row %d and %d both have %d\n", c+1, r+1, i+1, val)
 								fyne.Do(func() { statusBinding.Set(fmt.Sprintf("Conflict in Col %d", c+1)) })
 								return
 							}
@@ -934,7 +1010,6 @@ func main() {
 							for j := 0; j < 3; j++ {
 								tr, tc := sr+i, sc+j
 								if (tr != r || tc != c) && initialState.vals[tr][tc] == val {
-									fmt.Printf("CONFLICT: 3x3 Block at %d,%d and %d,%d both have %d\n", r+1, c+1, tr+1, tc+1, val)
 									fyne.Do(func() { statusBinding.Set("Conflict in 3x3 Block") })
 									return
 								}
@@ -955,82 +1030,13 @@ func main() {
 				}
 			}
 
-			// Propagation function for recursion
-			var propagate func(state *boardState, r, c, val int)
-			propagate = func(state *boardState, r, c, val int) {
-				state.vals[r][c] = val
-				for i := 0; i < 9; i++ {
-					state.notes[r][i][val-1] = false
-					state.notes[i][c][val-1] = false
-				}
-				sr, sc := (r/3)*3, (c/3)*3
-				for i := 0; i < 3; i++ {
-					for j := 0; j < 3; j++ {
-						state.notes[sr+i][sc+j][val-1] = false
-					}
-				}
-			}
-
-			var solveRecursive func(state boardState) (bool, [9][9]int)
-			solveRecursive = func(state boardState) (bool, [9][9]int) {
-				select {
-				case <-solverStop:
-					return false, [9][9]int{}
-				default:
-				}
-
-				// Find MRV cell
-				r, c := -1, -1
-				minNotes := 10
-				allFilled := true
-
-				for row := 0; row < 9; row++ {
-					for col := 0; col < 9; col++ {
-						if state.vals[row][col] == 0 {
-							allFilled = false
-							cnt := 0
-							for n := 0; n < 9; n++ {
-								if state.notes[row][col][n] {
-									cnt++
-								}
-							}
-							if cnt == 0 {
-								return false, [9][9]int{} // Dead end
-							}
-							if cnt < minNotes {
-								minNotes = cnt
-								r, c = row, col
-							}
-						}
-					}
-				}
-
-				if allFilled {
-					return true, state.vals
-				}
-
-				// Try candidates
-				for n := 0; n < 9; n++ {
-					if state.notes[r][c][n] {
-						nextState := state
-						propagate(&nextState, r, c, n+1)
-						success, result := solveRecursive(nextState)
-						if success {
-							return true, result
-						}
-					}
-				}
-
-				return false, [9][9]int{}
-			}
-
-			success, finalVals := solveRecursive(initialState)
-
-			if success {
+			if ok, res := solveRecursive(initialState, solverStop); ok {
 				fyne.Do(func() {
 					for r := 0; r < 9; r++ {
 						for c := 0; c < 9; c++ {
-							board.cells[r][c].val = finalVals[r][c]
+							if board.cells[r][c].val == 0 {
+								board.cells[r][c].val = res[r][c]
+							}
 							for n := 0; n < 9; n++ {
 								board.cells[r][c].notes[n] = false
 							}
@@ -1047,6 +1053,94 @@ func main() {
 			} else {
 				fyne.Do(func() {
 					statusBinding.Set("Gold Finger failed: No solution found.")
+				})
+			}
+		}()
+	}
+
+	raiseHand := func() {
+		solverMutex.Lock()
+		if solverRunning {
+			solverMutex.Unlock()
+			return
+		}
+		solverRunning = true
+		solverStop = make(chan struct{})
+		solverMutex.Unlock()
+
+		// Capture state
+		initialVals := [9][9]int{}
+		for r := 0; r < 9; r++ {
+			for c := 0; c < 9; c++ {
+				initialVals[r][c] = board.cells[r][c].val
+			}
+		}
+
+		go func() {
+			defer func() {
+				solverMutex.Lock()
+				solverRunning = false
+				solverMutex.Unlock()
+			}()
+
+			// Initialize state
+			initialState := boardState{vals: initialVals}
+			for r := 0; r < 9; r++ {
+				for c := 0; c < 9; c++ {
+					for n := 0; n < 9; n++ {
+						initialState.notes[r][c][n] = true
+					}
+				}
+			}
+
+			// Validate and Propagate Initial Grid
+			for r := 0; r < 9; r++ {
+				for c := 0; c < 9; c++ {
+					val := initialState.vals[r][c]
+					if val > 0 {
+						sr, sc := (r/3)*3, (c/3)*3
+						for i := 0; i < 9; i++ {
+							initialState.notes[r][i][val-1] = false
+							initialState.notes[i][c][val-1] = false
+						}
+						for i := 0; i < 3; i++ {
+							for j := 0; j < 3; j++ {
+								initialState.notes[sr+i][sc+j][val-1] = false
+							}
+						}
+					}
+				}
+			}
+
+			if ok, res := solveRecursive(initialState, solverStop); ok {
+				fyne.Do(func() {
+					tr, tc := selectedR, selectedC
+					if tr == -1 || tc == -1 || board.cells[tr][tc].val > 0 {
+						// Find first empty cell
+						tr, tc = -1, -1
+						found := false
+						for r := 0; r < 9 && !found; r++ {
+							for c := 0; c < 9 && !found; c++ {
+								if board.cells[r][c].val == 0 {
+									tr, tc = r, c
+									found = true
+								}
+							}
+						}
+					}
+
+					if tr != -1 && tc != -1 {
+						board.cells[tr][tc].isHintedPerm = true
+						handleInput(tr, tc, res[tr][tc], noteMode) // Force NORMAL mode by passing noteMode as opposite
+						board.cells[tr][tc].ShowHint()
+						statusBinding.Set(fmt.Sprintf("Hint: %d at %d,%d", res[tr][tc], tr+1, tc+1))
+					} else {
+						statusBinding.Set("No hints available (Puzzle solved?)")
+					}
+				})
+			} else {
+				fyne.Do(func() {
+					statusBinding.Set("Hint failed: No solution found.")
 				})
 			}
 		}()
@@ -1438,6 +1532,7 @@ func main() {
 	loadBtn := widget.NewButton("LOAD", loadGame)
 	autoBtn := widget.NewButton("AUTO NOTES", autoNotes)
 	goldFingerBtn := widget.NewButton("GOLD FINGER", goldFinger)
+	raiseHandBtn := widget.NewButtonWithIcon("", theme.HelpIcon(), raiseHand)
 	resetBtn := widget.NewButton("RESET", stopGoldFinger)
 
 	var modeBtn *widget.Button
@@ -1461,7 +1556,7 @@ func main() {
 	fileButtons.Add(loadBtn)
 	fileButtons.Add(autoBtn)
 
-	controlsRow := container.NewHBox(goldFingerBtn, resetBtn, modeBtn, pauseBtn)
+	controlsRow := container.NewHBox(goldFingerBtn, raiseHandBtn, resetBtn, modeBtn, pauseBtn)
 
 	for r := 0; r < 9; r++ {
 		for c := 0; c < 9; c++ {
