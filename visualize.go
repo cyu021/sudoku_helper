@@ -1306,13 +1306,39 @@ func main() {
 				return
 			}
 
-			// Fix for Android: unescape the URI name to get a human-readable string
-			rawName := writer.URI().Name()
-			if unescaped, err := url.QueryUnescape(rawName); err == nil {
-				if strings.HasSuffix(unescaped, ".json") {
-					saveFileName = unescaped
-					baseName = strings.TrimSuffix(saveFileName, "_savegame.json")
+			// Robust filename extraction for Android
+			var extractedName string
+			uriStr := writer.URI().String()
+			if unescaped, err := url.QueryUnescape(uriStr); err == nil && unescaped != "" {
+				// Heuristic 1: Look for anything that looks like a .json filename
+				re := regexp.MustCompile(`(?i)[^/\\:]+\.json`)
+				if match := re.FindString(unescaped); match != "" {
+					extractedName = match
+				} else {
+					// Heuristic 2: Split and find the last segment that isn't a known system pattern or ID
+					parts := strings.FieldsFunc(unescaped, func(r rune) bool {
+						return r == '/' || r == ':' || r == '\\'
+					})
+					for i := len(parts) - 1; i >= 0; i-- {
+						p := parts[i]
+						if p == "" || p == "content" || p == "primary" || 
+						   strings.HasPrefix(p, "document") || isNumeric(p) || 
+						   strings.Contains(p, "android.providers") ||
+						   strings.Contains(p, "google.android") {
+							continue
+						}
+						extractedName = p
+						break
+					}
 				}
+			}
+
+			// CRITICAL FIX: Only update the global saveFileName if the extracted name is "better"
+			// than what we already have (i.e. not an ID and not a system provider).
+			if extractedName != "" && !isNumeric(extractedName) && !strings.Contains(extractedName, "android.providers") {
+				saveFileName = extractedName
+				tempBase := strings.TrimSuffix(extractedName, "_savegame.json")
+				baseName = strings.TrimSuffix(tempBase, ".json")
 			}
 
 			statusBinding.Set("Game Saved to " + saveFileName)
@@ -1343,10 +1369,21 @@ func main() {
 						fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
 						fd.Show()
 					} else {
-						fd := dialog.NewFileSave(handleWriter, myWindow)
-						fd.SetFileName(saveFileName)
-						fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
-						fd.Show()
+						// Android NEW FILE: Use an entry dialog first to capture the filename
+						// because SAF URIs often hide the name behind numeric IDs.
+						nameEntry := widget.NewEntry()
+						nameEntry.SetText(baseName)
+						nameEntry.SetPlaceHolder("Enter filename (e.g. sdk100)")
+						dialog.ShowCustomConfirm("New Save Name", "SET NAME", "CANCEL", nameEntry, func(ok bool) {
+							if ok && nameEntry.Text != "" {
+								baseName = nameEntry.Text
+								saveFileName = baseName + "_savegame.json"
+								fd := dialog.NewFileSave(handleWriter, myWindow)
+								fd.SetFileName(saveFileName)
+								fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
+								fd.Show()
+							}
+						}, myWindow)
 					}
 				}, myWindow)
 			d.Show()
@@ -1393,13 +1430,35 @@ func main() {
 					}
 				}
 
-				// Fix for Android: Use url.QueryUnescape to get the human-readable name
-				rawName := reader.URI().Name()
-				if unescaped, err := url.QueryUnescape(rawName); err == nil {
-					if strings.HasSuffix(unescaped, ".json") {
-						saveFileName = unescaped
-						baseName = strings.TrimSuffix(saveFileName, "_savegame.json")
+				// Robust filename extraction for Android
+				var bestName string
+				uriStr := reader.URI().String()
+				if unescaped, err := url.QueryUnescape(uriStr); err == nil && unescaped != "" {
+					re := regexp.MustCompile(`(?i)[^/\\:]+\.json`)
+					if match := re.FindString(unescaped); match != "" {
+						bestName = match
+					} else {
+						parts := strings.FieldsFunc(unescaped, func(r rune) bool {
+							return r == '/' || r == ':' || r == '\\'
+						})
+						for i := len(parts) - 1; i >= 0; i-- {
+							p := parts[i]
+							if p == "" || p == "content" || p == "primary" || 
+							   strings.HasPrefix(p, "document") || isNumeric(p) || 
+							   strings.Contains(p, "android.providers") ||
+							   strings.Contains(p, "google.android") {
+								continue
+							}
+							bestName = p
+							break
+						}
 					}
+				}
+
+				if bestName != "" && !isNumeric(bestName) && !strings.Contains(bestName, "android.providers") {
+					saveFileName = bestName
+					tempBase := strings.TrimSuffix(bestName, "_savegame.json")
+					baseName = strings.TrimSuffix(tempBase, ".json")
 				}
 
 				board.Refresh()
@@ -1741,4 +1800,12 @@ func (l *squareLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	}
 	objects[0].Resize(fyne.NewSize(side, side))
 	objects[0].Move(fyne.NewPos((size.Width-side)/2, (size.Height-side)/2))
+}
+
+func isNumeric(s string) bool {
+	// Filter out common ID patterns like "1234" or "1000:5678" or "123-456"
+	clean := strings.ReplaceAll(s, ":", "")
+	clean = strings.ReplaceAll(clean, "-", "")
+	_, err := strconv.Atoi(clean)
+	return err == nil
 }
