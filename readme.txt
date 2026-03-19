@@ -11,11 +11,18 @@ A Golang toolkit to extract Sudoku grids from screenshots and solve them via a f
 - **Smart Save/Load**: 
   - **Desktop:** Standard file dialogs with pre-filled filenames for quick persistence.
   - **Mobile (Android):** A specialized **OVERWRITE** vs. **NEW FILE** workflow to bypass native Storage Access Framework (SAF) limitations, ensuring 100% reliable file replacement and clean, unescaped filenames.
-- **Integrated Timer**: Track your solving speed with a high-precision, pauseable playback timer.
-- **Automatic Notes**: Intelligent pencil-mark management based on Sudoku rules.
-- **Input Modes**: Toggle between **NORMAL** and **NOTES** (pencil marks) via a dedicated button or the **'N'** key.
+- **Advanced Visual Feedback**:
+  - **Conflict Highlighting**: Conflicting cells flash red for 1 second when an invalid move is attempted.
+  - **Digit Scanning**: Select a digit (1-9) to highlight all occurrences on the board in light green. Highlights are "sticky" across edits.
+  - **Dynamic Input**: Digit buttons automatically disable and gray out when a number has been placed 9 times.
+- **Dual Interaction Modes**: 
+  - **SELECT Mode**: Left-click to focus and select a cell.
+  - **SET Mode**: Left-click to instantly "stamp" the currently highlighted digit into a cell.
+- **Power User Shortcuts**: 
+  - **Right-Click / Long-Press**: Instantly place the highlighted digit into a cell using the current mode (**NORMAL** or **NOTES**).
+  - **Keyboard Support**: Full support for 0-9, Arrows, Backspace/Delete, and **'N'** to toggle input modes.
+- **Automatic Notes**: Intelligent pencil-mark management based on Sudoku rules via **AUTO NOTES**.
 - **UPLOAD (Web AI Integration)**: Paste JSON strings directly from tools like ChatGPT or Gemini.
-- **Fluent Navigation**: Full keyboard support (0-9, Arrows, Backspace/Delete). Navigation works even on locked clue cells.
 
 ## Screenshots
 ### Desktop (Windows/Linux)
@@ -72,9 +79,17 @@ fyne-cross android -app-id com.example.sudoku_helper -icon Icon.png -name Sudoku
 6. Toggle input mode using the **NORMAL/NOTES** button or press **'N'**.
 7. Use **Arrow Keys** to move across the board (including locked cells).
 8. Use **GOLD FINGER** for an instant solution.
+9. **Digit Scanning**: Click a digit button or press 1-9 while no cell is selected to highlight all instances of that number.
+10. **Click Modes**: 
+   - Use **SELECT** mode for standard navigation.
+   - Use **SET** mode for rapid "one-tap" digit entry.
+11. **Shortcuts**: Use **Right-click** (or Long-press on mobile) to quickly stamp the highlighted digit into any grid.
+12. **Deselect**: Click any empty area outside the grid or in the control panel to clear selection and scanning highlights.
+
 
 ## Troubleshooting
-- **Android Save (0B Files):** This issue is resolved in v0008. If you encounter issues, ensure you are using the **OVERWRITE** button when replacing existing files.
+- **Right-click on Windows/Linux:** If the standard right-click is not responsive, ensure the cell is selected first or try a brief long-press.
+- **Android Save (0B Files):** This issue is resolved. Use the **OVERWRITE** button when replacing existing files.
 - **Windows File Picker Logs:** You may see "Error getting file attributes" in the console when browsing the `C:` root. These are harmless library logs from Fyne and do not affect functionality.
 - **Gemini Extraction:** Ensure your Gemini CLI is logged in and using Gemini 3 models for the best results.
 

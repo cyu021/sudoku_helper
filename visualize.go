@@ -42,13 +42,26 @@ type GameState struct {
 
 type Cell struct {
 	widget.BaseWidget
-	row, col int
-	val      int
-	notes    [9]bool
-	isLocked bool
-	onSelect func(r, c int)
-	selected bool
-	hovered  bool
+	row, col           int
+	val                int
+	notes              [9]bool
+	isLocked           bool
+	onSelect           func(r, c int)
+	selected           bool
+	hovered            bool
+	isConflicting      bool
+	isDigitHighlighted bool
+}
+
+func (c *Cell) ShowConflict() {
+	c.isConflicting = true
+	c.Refresh()
+	time.AfterFunc(time.Second, func() {
+		fyne.Do(func() {
+			c.isConflicting = false
+			c.Refresh()
+		})
+	})
 }
 
 func NewCell(r, c, val int, isLocked bool, onSelect func(r, c int)) *Cell {
@@ -119,8 +132,16 @@ func (r *cellRenderer) MinSize() fyne.Size {
 }
 
 func (r *cellRenderer) Refresh() {
-	if r.cell.selected {
-		r.bg.FillColor = color.NRGBA{R: 80, G: 80, B: 200, A: 120} // Slightly more opaque for better visibility
+	if r.cell.isConflicting {
+		r.bg.FillColor = color.NRGBA{R: 255, G: 0, B: 0, A: 120} // Red background for errors
+		r.bg.StrokeColor = color.Transparent
+		r.bg.StrokeWidth = 0
+	} else if r.cell.selected {
+		r.bg.FillColor = color.NRGBA{R: 80, G: 80, B: 200, A: 120} // Blue background for selection
+		r.bg.StrokeColor = color.Transparent
+		r.bg.StrokeWidth = 0
+	} else if r.cell.isDigitHighlighted {
+		r.bg.FillColor = color.NRGBA{R: 144, G: 238, B: 144, A: 100} // Light green for digit highlight
 		r.bg.StrokeColor = color.Transparent
 		r.bg.StrokeWidth = 0
 	} else if r.cell.hovered {
@@ -161,8 +182,49 @@ func (r *cellRenderer) Refresh() {
 func (r *cellRenderer) Objects() []fyne.CanvasObject { return r.objects }
 func (r *cellRenderer) Destroy()                     {}
 
-func (c *Cell) Tapped(_ *fyne.PointEvent) {
+func (c *Cell) Tapped(ev *fyne.PointEvent) {
+	fmt.Printf("Cell Tapped at %d,%d, InteractionMode: %v\n", c.row, c.col, interactionMode)
 	c.onSelect(c.row, c.col)
+	
+	if interactionMode && highlightedDigit > 0 && handleInput != nil {
+		handleInput(c.row, c.col, highlightedDigit, false)
+	}
+}
+
+func (c *Cell) MouseDown(ev *desktop.MouseEvent) {
+	fmt.Printf("Cell MouseDown: Button=%v at %d,%d\n", ev.Button, c.row, c.col)
+	if ev.Button == desktop.MouseButtonSecondary {
+		c.SecondaryTapped(&fyne.PointEvent{Position: ev.Position})
+	}
+}
+
+func (c *Cell) MouseUp(ev *desktop.MouseEvent) {}
+
+func (c *Cell) LongTapped(ev *fyne.PointEvent) {
+	fmt.Printf("Cell LongTapped at %d,%d\n", c.row, c.col)
+	c.SecondaryTapped(ev)
+}
+
+func (c *Cell) SecondaryTapped(ev *fyne.PointEvent) {
+	fmt.Printf("Cell SecondaryTapped at %d,%d, Highlighted Digit: %d, Mode: %v\n", c.row, c.col, highlightedDigit, noteMode)
+	// First select the cell
+	c.onSelect(c.row, c.col)
+	
+	// If a digit button is selected (scanning mode), apply it using CURRENT mode
+	if highlightedDigit > 0 && handleInput != nil {
+		handleInput(c.row, c.col, highlightedDigit, false)
+		modeStr := "Digit"
+		if noteMode {
+			modeStr = "Note"
+		}
+		if statusBinding != nil {
+			statusBinding.Set(fmt.Sprintf("Placed %s %d at %d,%d", modeStr, highlightedDigit, c.row+1, c.col+1))
+		}
+	} else {
+		if statusBinding != nil {
+			statusBinding.Set("Right-click: No digit highlighted to place.")
+		}
+	}
 }
 
 func (c *Cell) MouseIn(_ *desktop.MouseEvent) {
@@ -215,6 +277,25 @@ func (c *compactTheme) Size(name fyne.ThemeSizeName) float32 {
 	return theme.DefaultTheme().Size(name)
 }
 
+type BackgroundTapper struct {
+	widget.BaseWidget
+	onTapped func()
+}
+
+func (b *BackgroundTapper) Tapped(_ *fyne.PointEvent) {
+	b.onTapped()
+}
+
+func (b *BackgroundTapper) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(canvas.NewRectangle(color.Transparent))
+}
+
+func NewBackgroundTapper(onTapped func()) *BackgroundTapper {
+	b := &BackgroundTapper{onTapped: onTapped}
+	b.ExtendBaseWidget(b)
+	return b
+}
+
 type SudokuBoard struct {
 	widget.BaseWidget
 	cells    [9][9]*Cell
@@ -231,6 +312,46 @@ func NewSudokuBoard(initialGrid [][]int, onSelect func(r, c int)) *SudokuBoard {
 	}
 	b.ExtendBaseWidget(b)
 	return b
+}
+
+func (b *SudokuBoard) Tapped(_ *fyne.PointEvent) {
+	b.onSelect(-1, -1)
+}
+
+func (b *SudokuBoard) MouseDown(ev *desktop.MouseEvent) {
+	fmt.Printf("Board MouseDown: Button=%v at pos %v\n", ev.Button, ev.Position)
+	if ev.Button == desktop.MouseButtonSecondary {
+		b.SecondaryTapped(&fyne.PointEvent{Position: ev.Position})
+	}
+}
+
+func (b *SudokuBoard) MouseUp(ev *desktop.MouseEvent) {}
+
+func (b *SudokuBoard) LongTapped(ev *fyne.PointEvent) {
+	fmt.Printf("Board LongTapped at pos: %v\n", ev.Position)
+	b.SecondaryTapped(ev)
+}
+
+func (b *SudokuBoard) SecondaryTapped(ev *fyne.PointEvent) {
+	fmt.Printf("Board SecondaryTapped at pos: %v, Highlighted Digit: %d, Mode: %v\n", ev.Position, highlightedDigit, noteMode)
+	
+	// Calculate cell index based on click position
+	size := b.Size()
+	side := size.Width
+	if size.Height < size.Width {
+		side = size.Height
+	}
+	cellSize := side / 9.0
+	offsetX := (size.Width - side) / 2.0
+	offsetY := (size.Height - side) / 2.0
+	
+	col := int((ev.Position.X - offsetX) / cellSize)
+	row := int((ev.Position.Y - offsetY) / cellSize)
+	
+	if row >= 0 && row < 9 && col >= 0 && col < 9 {
+		fmt.Printf("Board-level Right-click detected for cell %d,%d\n", row, col)
+		b.cells[row][col].SecondaryTapped(ev)
+	}
 }
 
 func (b *SudokuBoard) CreateRenderer() fyne.WidgetRenderer {
@@ -254,16 +375,17 @@ func (b *SudokuBoard) CreateRenderer() fyne.WidgetRenderer {
 
 	var objects []fyne.CanvasObject
 	objects = append(objects, bg) // Background MUST be first
-	for r := 0; r < 9; r++ {
-		for c := 0; c < 9; c++ {
-			objects = append(objects, b.cells[r][c])
-		}
-	}
 	for _, l := range hLines {
 		objects = append(objects, l)
 	}
 	for _, l := range vLines {
 		objects = append(objects, l)
+	}
+	// Cells MUST be last to be on top and receive all tap/click events
+	for r := 0; r < 9; r++ {
+		for c := 0; c < 9; c++ {
+			objects = append(objects, b.cells[r][c])
+		}
 	}
 
 	return &boardRenderer{
@@ -391,6 +513,27 @@ func (r *boardRenderer) Refresh() {
 func (r *boardRenderer) Objects() []fyne.CanvasObject { return r.objects }
 func (r *boardRenderer) Destroy()                     {}
 
+var (
+	btns                  [10]*widget.Button
+	updateButtonStates    func()
+	highlightBtn          func(index int)
+	board                 *SudokuBoard
+	selectedR, selectedC  int = -1, -1
+	highlightedDigit      int = -1
+	noteMode              bool
+	onSelect              func(r, c int)
+	updateDigitHighlights func(num int)
+	getConflictingCells   func(grid [9][9]int, r, c, num int) [][2]int
+	clearConflictingNotes func(r, c, num int)
+	handleInput           func(r, c, num int, useOppositeMode bool)
+	checkSolved           func() bool
+	stopTimer             func()
+	startTimer            func()
+	statusBinding         binding.String
+	timerBinding          binding.String
+	interactionMode       bool // false = SELECT, true = SET
+)
+
 func main() {
 	fmt.Println("Sudoku Helper starting...")
 
@@ -450,71 +593,93 @@ func main() {
 	myWindow := myApp.NewWindow("Sudoku Visualizer")
 	myWindow.SetIcon(resourceIconPng)
 
-	var board *SudokuBoard
-	var selectedR, selectedC int = -1, -1
+	updateDigitHighlights = func(num int) {
+		highlightedDigit = num
+		for r := 0; r < 9; r++ {
+			for c := 0; c < 9; c++ {
+				cell := board.cells[r][c]
+				cell.isDigitHighlighted = (num > 0 && cell.val == num)
+				cell.Refresh()
+			}
+		}
+	}
 
-	onSelect := func(r, c int) {
-		if selectedR != -1 {
+	onSelect = func(r, c int) {
+		if selectedR != -1 && selectedR < 9 && selectedC < 9 {
 			board.cells[selectedR][selectedC].selected = false
 			board.cells[selectedR][selectedC].Refresh()
 		}
 		selectedR, selectedC = r, c
-		board.cells[r][c].selected = true
-		board.cells[r][c].Refresh()
+		if r != -1 && c != -1 && r < 9 && c < 9 {
+			board.cells[r][c].selected = true
+			board.cells[r][c].Refresh()
+			// Don't clear highlights when selecting a cell
+		} else {
+			updateDigitHighlights(-1) // Clear digit highlights if clicking outside
+			highlightBtn(-1)          // Also clear digit button highlights
+		}
 	}
 
 	board = NewSudokuBoard(initialGrid, onSelect)
-	cells := &board.cells
 
-	isValidMove := func(grid [9][9]int, r, c, num int) bool {
+	getConflictingCells = func(grid [9][9]int, r, c, num int) [][2]int {
+		conflicts := [][2]int{}
+		// Check row
 		for col := 0; col < 9; col++ {
 			if col != c && grid[r][col] == num {
-				return false
+				conflicts = append(conflicts, [2]int{r, col})
 			}
 		}
+		// Check column
 		for row := 0; row < 9; row++ {
 			if row != r && grid[row][c] == num {
-				return false
+				conflicts = append(conflicts, [2]int{row, c})
 			}
 		}
+		// Check 3x3 box
 		startR, startC := (r/3)*3, (c/3)*3
 		for i := 0; i < 3; i++ {
 			for j := 0; j < 3; j++ {
-				if (startR+i != r || startC+j != c) && grid[startR+i][startC+j] == num {
-					return false
+				tr, tc := startR+i, startC+j
+				if (tr != r || tc != c) && grid[tr][tc] == num {
+					conflicts = append(conflicts, [2]int{tr, tc})
 				}
 			}
 		}
-		return true
+		return conflicts
 	}
 
-	clearConflictingNotes := func(r, c, num int) {
+	isValidMove := func(grid [9][9]int, r, c, num int) bool {
+		return len(getConflictingCells(grid, r, c, num)) == 0
+	}
+
+	clearConflictingNotes = func(r, c, num int) {
 		for col := 0; col < 9; col++ {
-			if col != c && cells[r][col].notes[num-1] {
-				cells[r][col].notes[num-1] = false
-				cells[r][col].Refresh()
+			if col != c && board.cells[r][col].notes[num-1] {
+				board.cells[r][col].notes[num-1] = false
+				board.cells[r][col].Refresh()
 			}
 		}
 		for row := 0; row < 9; row++ {
-			if row != r && cells[row][c].notes[num-1] {
-				cells[row][c].notes[num-1] = false
-				cells[row][c].Refresh()
+			if row != r && board.cells[row][c].notes[num-1] {
+				board.cells[row][c].notes[num-1] = false
+				board.cells[row][c].Refresh()
 			}
 		}
 		startR, startC := (r/3)*3, (c/3)*3
 		for i := 0; i < 3; i++ {
 			for j := 0; j < 3; j++ {
 				tr, tc := startR+i, startC+j
-				if (tr != r || tc != c) && cells[tr][tc].notes[num-1] {
-					cells[tr][tc].notes[num-1] = false
-					cells[tr][tc].Refresh()
+				if (tr != r || tc != c) && board.cells[tr][tc].notes[num-1] {
+					board.cells[tr][tc].notes[num-1] = false
+					board.cells[tr][tc].Refresh()
 				}
 			}
 		}
 	}
 
-	noteMode := false
-	statusBinding := binding.NewString()
+	noteMode = false
+	statusBinding = binding.NewString()
 	if len(os.Args) >= 2 {
 		statusBinding.Set("Loaded " + os.Args[1])
 	} else {
@@ -531,8 +696,9 @@ func main() {
 	var startTime time.Time
 	var totalElapsed time.Duration
 	timerRunning := false
-	timerBinding := binding.NewString()
+	timerBinding = binding.NewString()
 	timerBinding.Set("00:00:00")
+
 
 	updateTimerDisplay := func() {
 		dur := totalElapsed
@@ -554,7 +720,7 @@ func main() {
 		}
 	}()
 
-	startTimer := func() {
+	startTimer = func() {
 		if !timerRunning {
 			startTime = time.Now()
 			timerRunning = true
@@ -570,7 +736,7 @@ func main() {
 		}
 	}
 
-	stopTimer := func() {
+	stopTimer = func() {
 		if timerRunning {
 			totalElapsed += time.Since(startTime)
 			timerRunning = false
@@ -578,14 +744,14 @@ func main() {
 		fyne.Do(updateTimerDisplay)
 	}
 
-	checkSolved := func() bool {
+	checkSolved = func() bool {
 		var grid [9][9]int
 		for r := 0; r < 9; r++ {
 			for c := 0; c < 9; c++ {
-				if cells[r][c].val == 0 {
+				if board.cells[r][c].val == 0 {
 					return false
 				}
-				grid[r][c] = cells[r][c].val
+				grid[r][c] = board.cells[r][c].val
 			}
 		}
 
@@ -600,6 +766,67 @@ func main() {
 			}
 		}
 		return true
+	}
+
+	handleInput = func(r, c, num int, useOppositeMode bool) {
+		if r == -1 || c == -1 || r >= 9 || c >= 9 {
+			return
+		}
+		cell := board.cells[r][c]
+		if cell.isLocked {
+			return
+		}
+
+		actualNoteMode := noteMode
+		if useOppositeMode {
+			actualNoteMode = !noteMode
+		}
+
+		startTimer() // Start timer on input
+
+		if num == 0 {
+			cell.val = 0
+			for n := 0; n < 9; n++ {
+				cell.notes[n] = false
+			}
+			// Refresh highlights to account for the removed digit, if a highlight is active
+			if highlightedDigit != -1 {
+				updateDigitHighlights(highlightedDigit)
+			}
+		} else {
+			var grid [9][9]int
+			for row := 0; row < 9; row++ {
+				for col := 0; col < 9; col++ {
+					grid[row][col] = board.cells[row][col].val
+				}
+			}
+			conflicts := getConflictingCells(grid, r, c, num)
+			if len(conflicts) == 0 {
+				if actualNoteMode {
+					cell.val = 0
+					cell.notes[num-1] = !cell.notes[num-1]
+				} else {
+					cell.val = num
+					for n := 0; n < 9; n++ {
+						cell.notes[n] = false
+					}
+					clearConflictingNotes(r, c, num)
+					updateDigitHighlights(num)
+					highlightBtn(num)
+				}
+			} else {
+				for _, coord := range conflicts {
+					board.cells[coord[0]][coord[1]].ShowConflict()
+				}
+			}
+		}
+		cell.Refresh()
+		updateButtonStates()
+		if checkSolved() {
+			stopTimer()
+			val, _ := timerBinding.Get()
+			statusBinding.Set("Puzzle Solved! Final Time: " + val)
+		}
 	}
 
 	// Solver variables
@@ -626,7 +853,7 @@ func main() {
 		fmt.Println("--- Gold Finger Initial Grid ---")
 		for r := 0; r < 9; r++ {
 			for c := 0; c < 9; c++ {
-				initialVals[r][c] = cells[r][c].val
+				initialVals[r][c] = board.cells[r][c].val
 				fmt.Printf("%d ", initialVals[r][c])
 				if c == 2 || c == 5 {
 					fmt.Print("| ")
@@ -783,13 +1010,16 @@ func main() {
 				fyne.Do(func() {
 					for r := 0; r < 9; r++ {
 						for c := 0; c < 9; c++ {
-							cells[r][c].val = finalVals[r][c]
+							board.cells[r][c].val = finalVals[r][c]
 							for n := 0; n < 9; n++ {
-								cells[r][c].notes[n] = false
+								board.cells[r][c].notes[n] = false
 							}
 						}
 					}
 					board.Refresh()
+					updateButtonStates()
+					updateDigitHighlights(-1)
+					highlightBtn(-1)
 					stopTimer()
 					val, _ := timerBinding.Get()
 					statusBinding.Set("Gold Finger Success! Time: " + val)
@@ -817,15 +1047,18 @@ func main() {
 
 		for r := 0; r < 9; r++ {
 			for c := 0; c < 9; c++ {
-				if !cells[r][c].isLocked {
-					cells[r][c].val = 0
+				if !board.cells[r][c].isLocked {
+					board.cells[r][c].val = 0
 					for i := 0; i < 9; i++ {
-						cells[r][c].notes[i] = false
+						board.cells[r][c].notes[i] = false
 					}
 				}
 			}
 		}
 		board.Refresh()
+		updateButtonStates()
+		updateDigitHighlights(-1)
+		highlightBtn(-1)
 		statusBinding.Set("Gold Finger Stopped and Board Reset.")
 	}
 
@@ -903,14 +1136,17 @@ func main() {
 					for r := 0; r < 9; r++ {
 						for c := 0; c < 9; c++ {
 							val := newGrid[r][c]
-							cells[r][c].val = val
-							cells[r][c].isLocked = (val > 0)
+							board.cells[r][c].val = val
+							board.cells[r][c].isLocked = (val > 0)
 							for i := 0; i < 9; i++ {
-								cells[r][c].notes[i] = false
+								board.cells[r][c].notes[i] = false
 							}
 						}
 					}
 					board.Refresh()
+					updateButtonStates()
+					updateDigitHighlights(-1)
+					highlightBtn(-1)
 					statusBinding.Set("Imported " + filepath.Base(path) + ". Click SAVE to persist.")
 				})
 			}()
@@ -931,9 +1167,9 @@ func main() {
 		state := GameState{}
 		for r := 0; r < 9; r++ {
 			for c := 0; c < 9; c++ {
-				state.Values[r][c] = cells[r][c].val
-				state.Locked[r][c] = cells[r][c].isLocked
-				state.Notes[r][c] = cells[r][c].notes
+				state.Values[r][c] = board.cells[r][c].val
+				state.Locked[r][c] = board.cells[r][c].isLocked
+				state.Notes[r][c] = board.cells[r][c].notes
 			}
 		}
 		data, _ := json.Marshal(state)
@@ -1037,9 +1273,9 @@ func main() {
 			fyne.Do(func() {
 				for r := 0; r < 9; r++ {
 					for c := 0; c < 9; c++ {
-						cells[r][c].val = state.Values[r][c]
-						cells[r][c].isLocked = state.Locked[r][c]
-						cells[r][c].notes = state.Notes[r][c]
+						board.cells[r][c].val = state.Values[r][c]
+						board.cells[r][c].isLocked = state.Locked[r][c]
+						board.cells[r][c].notes = state.Notes[r][c]
 					}
 				}
 
@@ -1053,6 +1289,9 @@ func main() {
 				}
 
 				board.Refresh()
+				updateButtonStates()
+				updateDigitHighlights(-1)
+				highlightBtn(-1)
 				statusBinding.Set("Loaded " + saveFileName)
 			})
 		}, myWindow)
@@ -1124,16 +1363,19 @@ func main() {
 				for r := 0; r < 9; r++ {
 					for c := 0; c < 9; c++ {
 						val := sg.Grid[r][c]
-						cells[r][c].val = val
-						cells[r][c].isLocked = (val > 0)
+						board.cells[r][c].val = val
+						board.cells[r][c].isLocked = (val > 0)
 						for i := 0; i < 9; i++ {
-							cells[r][c].notes[i] = false
+							board.cells[r][c].notes[i] = false
 						}
 					}
 				}
 				baseName = "pasted_game"
 				saveFileName = "pasted_game_savegame.json"
 				board.Refresh()
+				updateButtonStates()
+				updateDigitHighlights(-1)
+				highlightBtn(-1)
 				statusBinding.Set("Successfully uploaded grid from pasted JSON")
 			})
 		}, myWindow)
@@ -1145,12 +1387,12 @@ func main() {
 	autoNotes := func() {
 		for r := 0; r < 9; r++ {
 			for c := 0; c < 9; c++ {
-				cell := cells[r][c]
+				cell := board.cells[r][c]
 				if cell.val == 0 {
 					var grid [9][9]int
 					for row := 0; row < 9; row++ {
 						for col := 0; col < 9; col++ {
-							grid[row][col] = cells[row][col].val
+							grid[row][col] = board.cells[row][col].val
 						}
 					}
 					for num := 1; num <= 9; num++ {
@@ -1205,14 +1447,33 @@ func main() {
 		for c := 0; c < 9; c++ {
 			val := initialGrid[r][c]
 			cell := NewCell(r, c, val, val > 0, onSelect)
-			cells[r][c] = cell
+			board.cells[r][c] = cell
 			cell.Refresh()
 		}
 	}
 
-	var btns [10]*widget.Button
 	numButtons := container.New(layout.NewGridLayout(5))
-	highlightBtn := func(index int) {
+	updateButtonStates = func() {
+		counts := make(map[int]int)
+		for r := 0; r < 9; r++ {
+			for c := 0; c < 9; c++ {
+				if board.cells[r][c].val > 0 {
+					counts[board.cells[r][c].val]++
+				}
+			}
+		}
+		for i := 1; i <= 9; i++ {
+			if btns[i] != nil {
+				if counts[i] >= 9 {
+					btns[i].Disable()
+				} else {
+					btns[i].Enable()
+				}
+			}
+		}
+	}
+
+	highlightBtn = func(index int) {
 		for i, b := range btns {
 			if b == nil {
 				continue
@@ -1229,46 +1490,17 @@ func main() {
 	for i := 0; i <= 9; i++ {
 		num := i
 		btn := widget.NewButton(strconv.Itoa(num), func() {
-			highlightBtn(num)
 			if selectedR == -1 {
+				highlightBtn(num)
+				if highlightedDigit == num {
+					updateDigitHighlights(-1)
+					highlightBtn(-1)
+				} else {
+					updateDigitHighlights(num)
+				}
 				return
 			}
-			cell := board.cells[selectedR][selectedC]
-			if cell.isLocked {
-				return
-			}
-			startTimer() // Start timer on input
-			if num == 0 {
-				cell.val = 0
-				for n := 0; n < 9; n++ {
-					cell.notes[n] = false
-				}
-			} else {
-				var grid [9][9]int
-				for row := 0; row < 9; row++ {
-					for col := 0; col < 9; col++ {
-						grid[row][col] = board.cells[row][col].val
-					}
-				}
-				if isValidMove(grid, selectedR, selectedC, num) {
-					if noteMode {
-						cell.val = 0
-						cell.notes[num-1] = !cell.notes[num-1]
-					} else {
-						cell.val = num
-						for n := 0; n < 9; n++ {
-							cell.notes[n] = false
-						}
-						clearConflictingNotes(selectedR, selectedC, num)
-					}
-				}
-			}
-			cell.Refresh()
-			if checkSolved() {
-				stopTimer()
-				val, _ := timerBinding.Get()
-				statusBinding.Set("Puzzle Solved! Final Time: " + val)
-			}
+			handleInput(selectedR, selectedC, num, false)
 		})
 		btns[i] = btn
 		numButtons.Add(btn)
@@ -1287,12 +1519,29 @@ func main() {
 			}
 			return
 		}
+
+		num := -1
+		if k.Name >= "0" && k.Name <= "9" {
+			num, _ = strconv.Atoi(string(k.Name))
+		} else if k.Name == fyne.KeyBackspace || k.Name == fyne.KeyDelete {
+			num = 0
+		}
+
+		// Digit highlight mode when no cell is selected
 		if selectedR == -1 {
+			if num > 0 {
+				if highlightedDigit == num {
+					updateDigitHighlights(-1)
+					highlightBtn(-1)
+				} else {
+					updateDigitHighlights(num)
+					highlightBtn(num)
+				}
+			}
 			return
 		}
-		cell := board.cells[selectedR][selectedC]
-
-		// Navigation keys should work even on locked cells
+		
+		// If a cell IS selected, handle navigation and editing
 		if k.Name == fyne.KeyLeft {
 			if selectedC > 0 {
 				onSelect(selectedR, selectedC-1)
@@ -1315,61 +1564,38 @@ func main() {
 			return
 		}
 
+		cell := board.cells[selectedR][selectedC]
 		if cell.isLocked {
 			return
 		}
 
-		num := -1
-		if k.Name >= "0" && k.Name <= "9" {
-			num, _ = strconv.Atoi(string(k.Name))
-		} else if k.Name == fyne.KeyBackspace || k.Name == fyne.KeyDelete {
-			num = 0
-		}
-
 		if num >= 0 && num <= 9 {
-			startTimer() // Start timer on input
-			if num == 0 {
-				cell.val = 0
-				for n := 0; n < 9; n++ {
-					cell.notes[n] = false
-				}
-			} else {
-				var grid [9][9]int
-				for row := 0; row < 9; row++ {
-					for col := 0; col < 9; col++ {
-						grid[row][col] = board.cells[row][col].val
-					}
-				}
-				if isValidMove(grid, selectedR, selectedC, num) {
-					if noteMode {
-						cell.val = 0
-						cell.notes[num-1] = !cell.notes[num-1]
-					} else {
-						cell.val = num
-						for n := 0; n < 9; n++ {
-							cell.notes[n] = false
-						}
-						clearConflictingNotes(selectedR, selectedC, num)
-					}
-				}
-			}
-			cell.Refresh()
-			if checkSolved() {
-				stopTimer()
-				val, _ := timerBinding.Get()
-				statusBinding.Set("Puzzle Solved! Final Time: " + val)
-			}
+			handleInput(selectedR, selectedC, num, false)
 		}
 	})
 
+	interactionToggle := widget.NewRadioGroup([]string{"SELECT", "SET"}, func(val string) {
+		interactionMode = (val == "SET")
+		statusBinding.Set("Interaction Mode: " + val)
+	})
+	interactionToggle.Horizontal = true
+	interactionToggle.SetSelected("SELECT")
+	interactionRow := container.NewHBox(widget.NewLabel("CLICK MODE:"), interactionToggle)
+
 	statusRow := container.NewBorder(nil, nil, nil, timerLabel, statusLabel)
-	topPanel := container.NewVBox(statusRow, fileButtons, controlsRow, numButtons)
+	topPanel := container.NewVBox(statusRow, fileButtons, controlsRow, numButtons, interactionRow)
 	// Apply compact theme to the top control panel
 	compact := &compactTheme{Theme: theme.DefaultTheme()}
 	topPanelWithTheme := container.NewThemeOverride(topPanel, compact)
 
 	content := container.NewBorder(topPanelWithTheme, nil, nil, nil, board)
-	myWindow.SetContent(content)
+	
+	// Wrap everything in a stack with a background tapper to clear selection when clicking outside
+	mainContent := container.NewStack(
+		NewBackgroundTapper(func() { onSelect(-1, -1) }),
+		content,
+	)
+	myWindow.SetContent(mainContent)
 
 	if runtime.GOOS != "android" {
 		myWindow.SetFixedSize(false)
