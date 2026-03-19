@@ -6,6 +6,7 @@ import (
 	"io"
 	"image/color"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -96,16 +98,24 @@ type cellRenderer struct {
 func (r *cellRenderer) Layout(size fyne.Size) {
 	r.bg.Resize(size)
 	r.mainText.Resize(size)
-	r.mainText.TextSize = size.Height * 0.7
+	
+	// Optimization: Only update TextSize if it has changed significantly
+	newMainSize := size.Height * 0.7
+	if r.mainText.TextSize != newMainSize {
+		r.mainText.TextSize = newMainSize
+	}
+	
 	r.noteContainer.Resize(size)
-	noteSize := size.Height * 0.22
+	newNoteSize := size.Height * 0.22
 	for _, t := range r.noteTexts {
-		t.TextSize = noteSize
+		if t.TextSize != newNoteSize {
+			t.TextSize = newNoteSize
+		}
 	}
 }
 
 func (r *cellRenderer) MinSize() fyne.Size {
-	return fyne.NewSize(30, 30) // Slightly larger min size
+	return fyne.NewSize(38, 38) // 1.5x increase from 25
 }
 
 func (r *cellRenderer) Refresh() {
@@ -115,12 +125,12 @@ func (r *cellRenderer) Refresh() {
 		r.bg.StrokeWidth = 0
 	} else if r.cell.hovered {
 		r.bg.FillColor = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
-		r.bg.StrokeColor = color.NRGBA{R: 255, G: 255, B: 255, A: 100}
-		r.bg.StrokeWidth = 1
+		r.bg.StrokeColor = color.Transparent
+		r.bg.StrokeWidth = 0
 	} else {
 		r.bg.FillColor = color.NRGBA{0, 0, 0, 1} // Almost transparent but solid for hit-testing
-		r.bg.StrokeColor = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
-		r.bg.StrokeWidth = 1
+		r.bg.StrokeColor = color.Transparent
+		r.bg.StrokeWidth = 0
 	}
 
 	if r.cell.val > 0 {
@@ -167,8 +177,232 @@ func (c *Cell) MouseOut() {
 
 func (c *Cell) MouseMoved(_ *desktop.MouseEvent) {}
 
+type compactTheme struct {
+	fyne.Theme
+}
+
+func (c *compactTheme) Color(name fyne.ThemeColorName, _ fyne.ThemeVariant) color.Color {
+	switch name {
+	case theme.ColorNameBackground:
+		return color.NRGBA{R: 30, G: 30, B: 30, A: 255}
+	case theme.ColorNameButton:
+		return color.NRGBA{R: 45, G: 45, B: 48, A: 255}
+	case theme.ColorNameDisabledButton:
+		return color.NRGBA{R: 28, G: 28, B: 28, A: 255}
+	case theme.ColorNameForeground:
+		return color.White
+	case theme.ColorNamePrimary:
+		return color.NRGBA{R: 0, G: 122, B: 204, A: 255} // Professional Blue
+	case theme.ColorNameInputBackground:
+		return color.NRGBA{R: 37, G: 37, B: 38, A: 255}
+	}
+	return theme.DefaultTheme().Color(name, theme.VariantDark)
+}
+
+func (c *compactTheme) Size(name fyne.ThemeSizeName) float32 {
+	if name == theme.SizeNameText {
+		return 12.5 // Tuned for high-DPI parity
+	}
+	if name == theme.SizeNamePadding {
+		return 2
+	}
+	if name == theme.SizeNameInlineIcon {
+		return 14
+	}
+	if name == theme.SizeNameScrollBar {
+		return 4
+	}
+	return theme.DefaultTheme().Size(name)
+}
+
+type SudokuBoard struct {
+	widget.BaseWidget
+	cells    [9][9]*Cell
+	onSelect func(r, c int)
+}
+
+func NewSudokuBoard(initialGrid [][]int, onSelect func(r, c int)) *SudokuBoard {
+	b := &SudokuBoard{onSelect: onSelect}
+	for r := 0; r < 9; r++ {
+		for c := 0; c < 9; c++ {
+			val := initialGrid[r][c]
+			b.cells[r][c] = NewCell(r, c, val, val > 0, onSelect)
+		}
+	}
+	b.ExtendBaseWidget(b)
+	return b
+}
+
+func (b *SudokuBoard) CreateRenderer() fyne.WidgetRenderer {
+	// Background to clear artifacts during resize
+	bg := canvas.NewRectangle(color.Black)
+
+	// 10x10 Grid Lines using Rectangles for perfect invalidation and layout scaling
+	hLines := make([]*canvas.Rectangle, 10)
+	vLines := make([]*canvas.Rectangle, 10)
+	for i := 0; i < 10; i++ {
+		h := canvas.NewRectangle(color.NRGBA{R: 255, G: 255, B: 255, A: 30})
+		v := canvas.NewRectangle(color.NRGBA{R: 255, G: 255, B: 255, A: 30})
+		// Thick lines for 3x3 blocks
+		if i%3 == 0 {
+			h.FillColor = color.White
+			v.FillColor = color.White
+		}
+		hLines[i] = h
+		vLines[i] = v
+	}
+
+	var objects []fyne.CanvasObject
+	objects = append(objects, bg) // Background MUST be first
+	for r := 0; r < 9; r++ {
+		for c := 0; c < 9; c++ {
+			objects = append(objects, b.cells[r][c])
+		}
+	}
+	for _, l := range hLines {
+		objects = append(objects, l)
+	}
+	for _, l := range vLines {
+		objects = append(objects, l)
+	}
+
+	return &boardRenderer{
+		board:   b,
+		bg:      bg,
+		hLines:  hLines,
+		vLines:  vLines,
+		objects: objects,
+	}
+}
+
+type boardRenderer struct {
+	board   *SudokuBoard
+	bg      *canvas.Rectangle
+	hLines  []*canvas.Rectangle
+	vLines  []*canvas.Rectangle
+	objects []fyne.CanvasObject
+
+	// Debouncing fields
+	lastSize    fyne.Size
+	resizeTimer *time.Timer
+	mu          sync.Mutex
+}
+
+func (r *boardRenderer) Layout(size fyne.Size) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// 1. Instant feedback: Resize the background immediately so it doesn't look blank
+	side := size.Width
+	if size.Height < size.Width {
+		side = size.Height
+	}
+	offsetX := (size.Width - side) / 2.0
+	offsetY := (size.Height - side) / 2.0
+	r.bg.Resize(fyne.NewSize(side, side))
+	r.bg.Move(fyne.NewPos(offsetX, offsetY))
+
+	// 2. If the size is still changing, stop the previous timer
+	if r.resizeTimer != nil {
+		r.resizeTimer.Stop()
+	}
+
+	// 3. Render immediately ONLY if the change is tiny (to avoid jitter)
+	// Otherwise, debounce the heavy cell/line layout
+	r.resizeTimer = time.AfterFunc(100*time.Millisecond, func() {
+		fyne.Do(func() {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			r.performLayout(size)
+		})
+	})
+}
+
+func (r *boardRenderer) performLayout(size fyne.Size) {
+	side := size.Width
+	if size.Height < size.Width {
+		side = size.Height
+	}
+	
+	// Float32 for perfect pixel alignment
+	cellSize := side / 9.0 
+	offsetX := (size.Width - side) / 2.0
+	offsetY := (size.Height - side) / 2.0
+
+	// Move and Resize cells
+	for row := 0; row < 9; row++ {
+		for col := 0; col < 9; col++ {
+			c := r.board.cells[row][col]
+			c.Resize(fyne.NewSize(cellSize, cellSize))
+			c.Move(fyne.NewPos(offsetX+(float32(col)*cellSize), offsetY+(float32(row)*cellSize)))
+		}
+	}
+
+	// Move and Resize grid lines
+	for i := 0; i < 10; i++ {
+		pos := float32(i) * cellSize
+		thickness := float32(1.0)
+		if i%3 == 0 {
+			thickness = 2.0
+		}
+		
+		// Horizontal lines
+		r.hLines[i].Resize(fyne.NewSize(side, thickness))
+		r.hLines[i].Move(fyne.NewPos(offsetX, offsetY+pos-(thickness/2.0)))
+		
+		// Vertical lines
+		r.vLines[i].Resize(fyne.NewSize(thickness, side))
+		r.vLines[i].Move(fyne.NewPos(offsetX+pos-(thickness/2.0), offsetY))
+	}
+	
+	r.board.Refresh()
+}
+
+func (r *boardRenderer) MinSize() fyne.Size {
+	return fyne.NewSize(338, 338) // 225 * 1.5
+}
+
+func (r *boardRenderer) Refresh() {
+	// 1. Refresh the background and lines
+	for i := 0; i < 10; i++ {
+		if i%3 == 0 {
+			r.hLines[i].FillColor = color.White
+			r.vLines[i].FillColor = color.White
+		} else {
+			r.hLines[i].FillColor = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
+			r.vLines[i].FillColor = color.NRGBA{R: 255, G: 255, B: 255, A: 30}
+		}
+		r.hLines[i].Refresh()
+		r.vLines[i].Refresh()
+	}
+	r.bg.FillColor = theme.BackgroundColor()
+	r.bg.Refresh()
+
+	// 2. CRITICAL FIX: Explicitly refresh all 81 cells to reflect state changes (like RESET)
+	for row := 0; row < 9; row++ {
+		for col := 0; col < 9; col++ {
+			r.board.cells[row][col].Refresh()
+		}
+	}
+
+	canvas.Refresh(r.board)
+}
+
+func (r *boardRenderer) Objects() []fyne.CanvasObject { return r.objects }
+func (r *boardRenderer) Destroy()                     {}
+
 func main() {
 	fmt.Println("Sudoku Helper starting...")
+
+	// Normalize scaling: Let Fyne handle DPI naturally by NOT forcing FYNE_SCALE
+	// unless specifically requested via the --scale flag.
+	for _, arg := range os.Args {
+		if strings.HasPrefix(arg, "--scale=") {
+			scale := strings.TrimPrefix(arg, "--scale=")
+			os.Setenv("FYNE_SCALE", scale)
+			fmt.Printf("Manually applied UI Scale: %s\n", scale)
+		}
+	}
 	var initialGrid [][]int
 	var baseName string
 	var saveFileName string
@@ -212,22 +446,25 @@ func main() {
 
 	myApp := app.NewWithID("com.gemini.sudoku")
 	myApp.Settings().SetTheme(theme.DarkTheme())
+
 	myWindow := myApp.NewWindow("Sudoku Visualizer")
 	myWindow.SetIcon(resourceIconPng)
 
-	cells := [9][9]*Cell{}
+	var board *SudokuBoard
 	var selectedR, selectedC int = -1, -1
-	var bigGrid *fyne.Container
 
 	onSelect := func(r, c int) {
 		if selectedR != -1 {
-			cells[selectedR][selectedC].selected = false
-			cells[selectedR][selectedC].Refresh()
+			board.cells[selectedR][selectedC].selected = false
+			board.cells[selectedR][selectedC].Refresh()
 		}
 		selectedR, selectedC = r, c
-		cells[r][c].selected = true
-		cells[r][c].Refresh()
+		board.cells[r][c].selected = true
+		board.cells[r][c].Refresh()
 	}
+
+	board = NewSudokuBoard(initialGrid, onSelect)
+	cells := &board.cells
 
 	isValidMove := func(grid [9][9]int, r, c, num int) bool {
 		for col := 0; col < 9; col++ {
@@ -289,6 +526,81 @@ func main() {
 	}
 	statusLabel := widget.NewLabelWithData(statusBinding)
 	statusLabel.Wrapping = fyne.TextWrapWord
+
+	// Timer variables
+	var startTime time.Time
+	var totalElapsed time.Duration
+	timerRunning := false
+	timerBinding := binding.NewString()
+	timerBinding.Set("00:00:00")
+
+	updateTimerDisplay := func() {
+		dur := totalElapsed
+		if timerRunning {
+			dur += time.Since(startTime)
+		}
+		h := int(dur.Hours())
+		m := int(dur.Minutes()) % 60
+		s := int(dur.Seconds()) % 60
+		timerBinding.Set(fmt.Sprintf("%02d:%02d:%02d", h, m, s))
+	}
+
+	go func() {
+		for {
+			time.Sleep(250 * time.Millisecond) // Higher frequency for better responsiveness
+			if timerRunning {
+				fyne.Do(updateTimerDisplay)
+			}
+		}
+	}()
+
+	startTimer := func() {
+		if !timerRunning {
+			startTime = time.Now()
+			timerRunning = true
+			fyne.Do(updateTimerDisplay) // Update immediately
+		}
+	}
+
+	pauseTimer := func() {
+		if timerRunning {
+			totalElapsed += time.Since(startTime)
+			timerRunning = false
+			fyne.Do(updateTimerDisplay)
+		}
+	}
+
+	stopTimer := func() {
+		if timerRunning {
+			totalElapsed += time.Since(startTime)
+			timerRunning = false
+		}
+		fyne.Do(updateTimerDisplay)
+	}
+
+	checkSolved := func() bool {
+		var grid [9][9]int
+		for r := 0; r < 9; r++ {
+			for c := 0; c < 9; c++ {
+				if cells[r][c].val == 0 {
+					return false
+				}
+				grid[r][c] = cells[r][c].val
+			}
+		}
+
+		for r := 0; r < 9; r++ {
+			for c := 0; c < 9; c++ {
+				val := grid[r][c]
+				grid[r][c] = 0
+				if !isValidMove(grid, r, c, val) {
+					return false
+				}
+				grid[r][c] = val
+			}
+		}
+		return true
+	}
 
 	// Solver variables
 	solverStop := make(chan struct{})
@@ -477,8 +789,10 @@ func main() {
 							}
 						}
 					}
-					bigGrid.Refresh()
-					statusBinding.Set("Gold Finger Success!")
+					board.Refresh()
+					stopTimer()
+					val, _ := timerBinding.Get()
+					statusBinding.Set("Gold Finger Success! Time: " + val)
 				})
 			} else {
 				fyne.Do(func() {
@@ -496,6 +810,11 @@ func main() {
 		solverMutex.Unlock()
 		clearFailedCache()
 
+		// Reset timer
+		timerRunning = false
+		totalElapsed = 0
+		fyne.Do(updateTimerDisplay)
+
 		for r := 0; r < 9; r++ {
 			for c := 0; c < 9; c++ {
 				if !cells[r][c].isLocked {
@@ -506,7 +825,7 @@ func main() {
 				}
 			}
 		}
-		bigGrid.Refresh()
+		board.Refresh()
 		statusBinding.Set("Gold Finger Stopped and Board Reset.")
 	}
 
@@ -591,7 +910,7 @@ func main() {
 							}
 						}
 					}
-					bigGrid.Refresh()
+					board.Refresh()
 					statusBinding.Set("Imported " + filepath.Base(path) + ". Click SAVE to persist.")
 				})
 			}()
@@ -619,32 +938,79 @@ func main() {
 		}
 		data, _ := json.Marshal(state)
 
-		fd := dialog.NewFileSave(func(writer fyne.URIWriteCloser, err error) {
+		handleWriter := func(writer fyne.URIWriteCloser, err error) {
 			if err != nil || writer == nil {
 				return
 			}
-			defer writer.Close()
 
-			_, err = writer.Write(data)
-			if err != nil {
-				statusBinding.Set("Failed to save: " + err.Error())
+			// Single-pass write to ensure atomic-like behavior on SAF
+			_, writeErr := writer.Write(data)
+			closeErr := writer.Close()
+
+			if writeErr != nil {
+				statusBinding.Set("Failed to write data: " + writeErr.Error())
+				return
+			}
+			if closeErr != nil {
+				statusBinding.Set("Failed to finalize save: " + closeErr.Error())
 				return
 			}
 
-			path := writer.URI().Path()
-			saveFileName = filepath.Base(path)
-			baseName = strings.TrimSuffix(saveFileName, "_savegame.json")
+			// Fix for Android: unescape the URI name to get a human-readable string
+			rawName := writer.URI().Name()
+			if unescaped, err := url.QueryUnescape(rawName); err == nil {
+				if strings.HasSuffix(unescaped, ".json") {
+					saveFileName = unescaped
+					baseName = strings.TrimSuffix(saveFileName, "_savegame.json")
+				}
+			}
 
 			statusBinding.Set("Game Saved to " + saveFileName)
-		}, myWindow)
-
-		cwd, _ := os.Getwd()
-		if l, err := storage.ListerForURI(storage.NewFileURI(cwd)); err == nil {
-			fd.SetLocation(l)
 		}
-		fd.SetFileName(saveFileName)
-		fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
-		fd.Show()
+
+		if runtime.GOOS == "android" || runtime.GOOS == "ios" {
+			// On Android, 'NewFileSave' can be unresponsive for overwriting existing files.
+			// We provide a dedicated 'OVERWRITE' choice that uses 'NewFileOpen' (which is responsive)
+			// to pick the target file, and then we obtain a writer for it.
+			d := dialog.NewCustomConfirm("Save Game", "OVERWRITE", "NEW FILE",
+				widget.NewLabel("Choose 'OVERWRITE' to pick an existing file,\nor 'NEW FILE' to create a new one."),
+				func(isOverwrite bool) {
+					if isOverwrite {
+						fd := dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+							if err != nil || reader == nil {
+								return
+							}
+							uri := reader.URI()
+							reader.Close() // Close reader to free up the file for writing
+							
+							writer, err := storage.Writer(uri)
+							if err != nil {
+								statusBinding.Set("Error opening for write: " + err.Error())
+								return
+							}
+							handleWriter(writer, nil)
+						}, myWindow)
+						fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
+						fd.Show()
+					} else {
+						fd := dialog.NewFileSave(handleWriter, myWindow)
+						fd.SetFileName(saveFileName)
+						fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
+						fd.Show()
+					}
+				}, myWindow)
+			d.Show()
+		} else {
+			// Desktop: standard Save dialog with pre-filled name
+			fd := dialog.NewFileSave(handleWriter, myWindow)
+			cwd, _ := os.Getwd()
+			if l, err := storage.ListerForURI(storage.NewFileURI(cwd)); err == nil {
+				fd.SetLocation(l)
+			}
+			fd.SetFileName(saveFileName)
+			fd.SetFilter(storage.NewExtensionFileFilter([]string{".json"}))
+			fd.Show()
+		}
 	}
 
 	loadGame := func() {
@@ -664,7 +1030,7 @@ func main() {
 
 			var state GameState
 			if err := json.Unmarshal(data, &state); err != nil {
-				statusBinding.Set("Failed to parse " + filepath.Base(path))
+				statusBinding.Set("Failed to parse " + reader.URI().Name())
 				return
 			}
 
@@ -677,11 +1043,17 @@ func main() {
 					}
 				}
 
-				baseName = strings.TrimSuffix(filepath.Base(path), "_savegame.json")
-				saveFileName = filepath.Base(path)
+				// Fix for Android: Use url.QueryUnescape to get the human-readable name
+				rawName := reader.URI().Name()
+				if unescaped, err := url.QueryUnescape(rawName); err == nil {
+					if strings.HasSuffix(unescaped, ".json") {
+						saveFileName = unescaped
+						baseName = strings.TrimSuffix(saveFileName, "_savegame.json")
+					}
+				}
 
-				bigGrid.Refresh()
-				statusBinding.Set("Loaded " + filepath.Base(path))
+				board.Refresh()
+				statusBinding.Set("Loaded " + saveFileName)
 			})
 		}, myWindow)
 
@@ -761,7 +1133,7 @@ func main() {
 				}
 				baseName = "pasted_game"
 				saveFileName = "pasted_game_savegame.json"
-				bigGrid.Refresh()
+				board.Refresh()
 				statusBinding.Set("Successfully uploaded grid from pasted JSON")
 			})
 		}, myWindow)
@@ -795,6 +1167,9 @@ func main() {
 		statusBinding.Set("Automatic Pencil Notes Filled")
 	}
 
+	timerLabel := widget.NewLabelWithData(timerBinding)
+	pauseBtn := widget.NewButton("PAUSE", pauseTimer)
+
 	importBtn := widget.NewButton("IMPORT", importImage)
 	uploadBtn := widget.NewButton("UPLOAD", uploadGrid)
 	saveBtn := widget.NewButton("SAVE", saveGame)
@@ -824,7 +1199,7 @@ func main() {
 	fileButtons.Add(loadBtn)
 	fileButtons.Add(autoBtn)
 
-	solverButtons := container.NewHBox(goldFingerBtn, resetBtn, modeBtn)
+	controlsRow := container.NewHBox(goldFingerBtn, resetBtn, modeBtn, pauseBtn)
 
 	for r := 0; r < 9; r++ {
 		for c := 0; c < 9; c++ {
@@ -835,27 +1210,8 @@ func main() {
 		}
 	}
 
-	bigGrid = container.New(layout.NewGridLayout(3))
-	for br := 0; br < 3; br++ {
-		for bc := 0; bc < 3; bc++ {
-			subGrid := container.New(layout.NewGridLayout(3))
-			for r := 0; r < 3; r++ {
-				for c := 0; c < 3; c++ {
-					subGrid.Add(cells[br*3+r][bc*3+c])
-				}
-			}
-			block := container.NewPadded(subGrid)
-			rect := canvas.NewRectangle(color.Transparent)
-			rect.StrokeColor = theme.ForegroundColor()
-			rect.StrokeWidth = 2
-			bigGrid.Add(container.NewStack(rect, block))
-		}
-	}
-
-	boardContainer := container.New(newSquareLayout(), bigGrid)
-
 	var btns [10]*widget.Button
-	numButtons := container.New(layout.NewGridLayout(10))
+	numButtons := container.New(layout.NewGridLayout(5))
 	highlightBtn := func(index int) {
 		for i, b := range btns {
 			if b == nil {
@@ -877,10 +1233,11 @@ func main() {
 			if selectedR == -1 {
 				return
 			}
-			cell := cells[selectedR][selectedC]
+			cell := board.cells[selectedR][selectedC]
 			if cell.isLocked {
 				return
 			}
+			startTimer() // Start timer on input
 			if num == 0 {
 				cell.val = 0
 				for n := 0; n < 9; n++ {
@@ -890,7 +1247,7 @@ func main() {
 				var grid [9][9]int
 				for row := 0; row < 9; row++ {
 					for col := 0; col < 9; col++ {
-						grid[row][col] = cells[row][col].val
+						grid[row][col] = board.cells[row][col].val
 					}
 				}
 				if isValidMove(grid, selectedR, selectedC, num) {
@@ -907,6 +1264,11 @@ func main() {
 				}
 			}
 			cell.Refresh()
+			if checkSolved() {
+				stopTimer()
+				val, _ := timerBinding.Get()
+				statusBinding.Set("Puzzle Solved! Final Time: " + val)
+			}
 		})
 		btns[i] = btn
 		numButtons.Add(btn)
@@ -928,7 +1290,7 @@ func main() {
 		if selectedR == -1 {
 			return
 		}
-		cell := cells[selectedR][selectedC]
+		cell := board.cells[selectedR][selectedC]
 
 		// Navigation keys should work even on locked cells
 		if k.Name == fyne.KeyLeft {
@@ -956,13 +1318,66 @@ func main() {
 		if cell.isLocked {
 			return
 		}
+
+		num := -1
+		if k.Name >= "0" && k.Name <= "9" {
+			num, _ = strconv.Atoi(string(k.Name))
+		} else if k.Name == fyne.KeyBackspace || k.Name == fyne.KeyDelete {
+			num = 0
+		}
+
+		if num >= 0 && num <= 9 {
+			startTimer() // Start timer on input
+			if num == 0 {
+				cell.val = 0
+				for n := 0; n < 9; n++ {
+					cell.notes[n] = false
+				}
+			} else {
+				var grid [9][9]int
+				for row := 0; row < 9; row++ {
+					for col := 0; col < 9; col++ {
+						grid[row][col] = board.cells[row][col].val
+					}
+				}
+				if isValidMove(grid, selectedR, selectedC, num) {
+					if noteMode {
+						cell.val = 0
+						cell.notes[num-1] = !cell.notes[num-1]
+					} else {
+						cell.val = num
+						for n := 0; n < 9; n++ {
+							cell.notes[n] = false
+						}
+						clearConflictingNotes(selectedR, selectedC, num)
+					}
+				}
+			}
+			cell.Refresh()
+			if checkSolved() {
+				stopTimer()
+				val, _ := timerBinding.Get()
+				statusBinding.Set("Puzzle Solved! Final Time: " + val)
+			}
+		}
 	})
 
-	topPanel := container.NewVBox(statusLabel, fileButtons, solverButtons, numButtons)
-	content := container.NewBorder(topPanel, nil, nil, nil, boardContainer)
+	statusRow := container.NewBorder(nil, nil, nil, timerLabel, statusLabel)
+	topPanel := container.NewVBox(statusRow, fileButtons, controlsRow, numButtons)
+	// Apply compact theme to the top control panel
+	compact := &compactTheme{Theme: theme.DefaultTheme()}
+	topPanelWithTheme := container.NewThemeOverride(topPanel, compact)
+
+	content := container.NewBorder(topPanelWithTheme, nil, nil, nil, board)
 	myWindow.SetContent(content)
-	myWindow.SetFixedSize(false)
-	myWindow.Resize(fyne.NewSize(550, 650))
+
+	if runtime.GOOS != "android" {
+		myWindow.SetFixedSize(false)
+	} else {
+		myWindow.SetFixedSize(true)
+	}
+
+	myWindow.Resize(fyne.NewSize(500, 750))
 	myWindow.ShowAndRun()
 }
 
