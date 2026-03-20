@@ -14,3 +14,24 @@ var resourceIconPng = &fyne.StaticResource{
 	StaticName:    "Icon.png",
 	StaticContent: resourceIconPngData,
 }
+
+//go:embed GameOverIcon.png
+var resourceGameOverIconPngData []byte
+var resourceGameOverIconPng = &fyne.StaticResource{
+	StaticName:    "GameOverIcon.png",
+	StaticContent: resourceGameOverIconPngData,
+}
+
+//go:embed PuzzleSolveIcon.png
+var resourcePuzzleSolveIconPngData []byte
+var resourcePuzzleSolveIconPng = &fyne.StaticResource{
+	StaticName:    "PuzzleSolveIcon.png",
+	StaticContent: resourcePuzzleSolveIconPngData,
+}
+
+//go:embed attribute.txt
+var resourceAttributeTxtData []byte
+var resourceAttributeTxt = &fyne.StaticResource{
+	StaticName:    "attribute.txt",
+	StaticContent: resourceAttributeTxtData,
+}

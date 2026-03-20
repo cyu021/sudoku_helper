@@ -12,33 +12,34 @@ A high-performance Golang toolkit for extracting Sudoku grids from screenshots a
 
 ### 🧩 Intelligent Solving & Assistance
 - **Gold Finger (Full Solver)**: A high-performance, deterministic solver using the **Minimum Remaining Values (MRV)** heuristic. It solves even the most complex puzzles instantly.
-- **Raise Hand (Single Hint)**: Stuck on a move? The "Raise Hand" feature identifies the next logical step and places a single digit. 
-  - **Visual Cue**: Hinted cells flash **Light Yellow** (RGB: 255, 255, 100) and the digit is permanently marked in **Bold Pink** (RGB: 255, 105, 180) for easy tracking.
+- **Raise Hand (Single Hint)**: Stuck on a move? Click the **Help Icon (Question Mark)** to identify the next logical step. 
+  - **Visual Cue**: Hinted cells flash **Light Yellow** (RGB: 255, 255, 100) and the digit is permanently marked in **Bold Pink** (RGB: 255, 105, 180).
 - **Auto Notes**: Automatically manages pencil marks (candidates) for all empty cells based on current board rules.
+- **Advanced Candidate Validation**: The engine continuously monitors candidate logic. If a move forces a violation (e.g., multiple cells in a block forced to the same value), the status bar triggers a **"GAME OVER"** warning.
 
 ### 🎮 Dynamic Interaction Modes
 - **SELECT Mode**: Standard navigation; click to focus a cell and use keyboard/number pad input.
 - **SET Mode (Stamping)**: Pre-select a digit to enter "Stamp Mode." Clicking any empty cell instantly places that digit—perfect for rapid filling.
 - **NOTES Toggle**: Quickly switch between entering final digits and pencil marks via the GUI button or the **'N'** keyboard shortcut.
+- **Digit Scanning**: Tapping any filled cell highlights all occurrences of that digit in **Vibrant Light Green** (RGB: 39, 245, 63), including corresponding pencil marks.
 - **Power User Shortcuts**:
-  - **Right-Click / Long-Press**: Instantly "stamp" the currently highlighted digit into any cell using the current mode (**NORMAL** or **NOTES**).
-  - **Arrow Keys**: Fluidly navigate the 9x9 grid.
+  - **'N'**: Toggle Normal/Notes mode.
+  - **'0'-'9'**: Place digit (0 clears cell).
+  - **'1'-'9' (No Selection)**: Toggle Digit Scanning for that number.
+  - **Backspace / Delete**: Clear cell.
+  - **Arrow Keys**: Navigate the grid.
+  - **Right-Click / Long-Press**: Instantly "stamp" the currently highlighted digit into any cell.
 
 ### 🌈 Advanced Visual Feedback
 - **Conflict Highlighting**: Invalid moves trigger a 1-second **Red Flash** on conflicting cells, preventing illegal placements.
-- **Digit Scanning & Note Tracking**: 
-  - Tapping any filled cell highlights all occurrences of that digit in **Vibrant Light Green** (RGB: 39, 245, 63).
-  - Corresponding pencil marks (notes) for the scanned digit are also highlighted, making candidate tracking effortless.
 - **Dynamic Buttons**: Number buttons automatically gray out and disable once a digit has been placed 9 times on the board.
+- **Grid Rendering**: Uses a custom 10x10 rectangle-based grid system for artifact-free rendering and debounced resizing to ensure a smooth UI experience.
 
 ### 🛠️ Professional Tooling
 - **Integrated Timer**: Track your solving speed with a high-precision, pauseable timer that stops automatically upon completion.
-- **Compact & High-DPI Ready**:
-  - Features a custom **Compact Dark Theme** for maximum screen real estate.
-  - **Manual Scaling**: Use the `--scale=X` flag (e.g., `--scale=1.5`) to override system DPI settings.
-- **Multi-Platform Consistency**: 
-  - **Windows/Linux**: Static, console-less builds with native file dialogs.
-  - **Android**: Specialized file management with an **OVERWRITE** vs. **NEW FILE** workflow to bypass SAF limitations, ensuring reliable Save/Load functionality.
+- **Compact Dark Theme**: Custom-tuned dark theme with optimized padding and text sizes for maximum focus.
+- **Manual Scaling**: Use the `--scale=X` flag (e.g., `--scale=1.5`) to override system DPI settings.
+- **Android Specialized Workflow**: Bypasses Storage Access Framework (SAF) limitations with an **OVERWRITE** vs. **NEW FILE** system, ensuring reliable persistence of game states.
 
 ---
 
@@ -94,7 +95,7 @@ Apply manual UI scaling (useful for High-DPI displays):
 ### In-App Workflow
 1. **Desktop:** Click **IMPORT** to select a Sudoku screenshot (requires Gemini CLI installed and configured).
 2. **Mobile/Web:** Upload your screenshot to an LLM (ChatGPT/Gemini), copy the JSON grid, and click **UPLOAD** in the app.
-3. **Solving:** Toggle between **NORMAL** and **NOTES** mode (or press **'N'**). Use **GOLD FINGER** if you want the full solution or **Raise Hand** for a single hint.
+3. **Solving:** Toggle between **NORMAL** and **NOTES** mode (or press **'N'**). Use **GOLD FINGER** if you want the full solution or **Raise Hand (?)** for a single hint.
 4. **Saving:** Use the **SAVE** button to persist your progress to a JSON file.
 
 ## Troubleshooting
