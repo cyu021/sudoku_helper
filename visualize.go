@@ -1163,6 +1163,7 @@ func main() {
 			for c := 0; c < 9; c++ {
 				if !board.cells[r][c].isLocked {
 					board.cells[r][c].val = 0
+					board.cells[r][c].isHintedPerm = false
 					for i := 0; i < 9; i++ {
 						board.cells[r][c].notes[i] = false
 					}
@@ -1173,7 +1174,7 @@ func main() {
 		updateButtonStates()
 		updateDigitHighlights(-1)
 		highlightBtn(-1)
-		statusBinding.Set("Gold Finger Stopped and Board Reset.")
+		statusBinding.Set("Board Reset.")
 	}
 
 	importImage := func() {
