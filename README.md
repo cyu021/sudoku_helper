@@ -16,19 +16,14 @@ A high-performance Golang toolkit for extracting Sudoku grids from screenshots a
   - **Visual Cue**: Hinted cells flash **Light Yellow** (RGB: 255, 255, 100) and the digit is permanently marked in **Bold Pink** (RGB: 255, 105, 180).
 - **Auto Notes**: Automatically manages pencil marks (candidates) for all empty cells based on current board rules.
 - **Advanced Candidate Validation**: The engine continuously monitors candidate logic. If a move forces a violation (e.g., multiple cells in a block forced to the same value), the status bar triggers a **"GAME OVER"** warning.
+- **Undo System**: Supports up to 200 steps of history, allowing you to backtrack through any number of moves or hints.
 
 ### 🎮 Dynamic Interaction Modes
-- **SELECT Mode**: Standard navigation; click to focus a cell and use keyboard/number pad input.
-- **SET Mode (Stamping)**: Pre-select a digit to enter "Stamp Mode." Clicking any empty cell instantly places that digit—perfect for rapid filling.
+- **CLICK MODE: SELECT**: Standard navigation; click to focus a cell and use keyboard/number pad input.
+- **CLICK MODE: SET (Stamping)**: Pre-select a digit to enter "Stamp Mode." Clicking any empty cell instantly places that digit—perfect for rapid filling.
 - **NOTES Toggle**: Quickly switch between entering final digits and pencil marks via the GUI button or the **'N'** keyboard shortcut.
 - **Digit Scanning**: Tapping any filled cell highlights all occurrences of that digit in **Vibrant Light Green** (RGB: 39, 245, 63), including corresponding pencil marks.
-- **Power User Shortcuts**:
-  - **'N'**: Toggle Normal/Notes mode.
-  - **'0'-'9'**: Place digit (0 clears cell).
-  - **'1'-'9' (No Selection)**: Toggle Digit Scanning for that number.
-  - **Backspace / Delete**: Clear cell.
-  - **Arrow Keys**: Navigate the grid.
-  - **Right-Click / Long-Press**: Instantly "stamp" the currently highlighted digit into any cell.
+- **Global Selection Clear**: Clicking any empty area outside the grid instantly clears the current cell selection and digit highlights.
 
 ### 🌈 Advanced Visual Feedback
 - **Conflict Highlighting**: Invalid moves trigger a 1-second **Red Flash** on conflicting cells, preventing illegal placements.
@@ -36,10 +31,34 @@ A high-performance Golang toolkit for extracting Sudoku grids from screenshots a
 - **Grid Rendering**: Uses a custom 10x10 rectangle-based grid system for artifact-free rendering and debounced resizing to ensure a smooth UI experience.
 
 ### 🛠️ Professional Tooling
-- **Integrated Timer**: Track your solving speed with a high-precision, pauseable timer that stops automatically upon completion.
+- **Integrated Timer**: Track your solving speed with a high-precision timer. Includes a **PAUSE** function to stop the clock during breaks.
 - **Compact Dark Theme**: Custom-tuned dark theme with optimized padding and text sizes for maximum focus.
 - **Manual Scaling**: Use the `--scale=X` flag (e.g., `--scale=1.5`) to override system DPI settings.
 - **Android Specialized Workflow**: Bypasses Storage Access Framework (SAF) limitations with an **OVERWRITE** vs. **NEW FILE** system, ensuring reliable persistence of game states.
+
+---
+
+## Keyboard Shortcuts
+
+| Key | Action |
+| :--- | :--- |
+| **'N'** | Toggle Normal/Notes mode |
+| **'1'-'9'** | Place digit (or toggle note in Notes mode) |
+| **'0' / Backspace / Delete** | Clear selected cell |
+| **Arrow Keys** | Navigate the grid |
+| **'1'-'9' (No Selection)** | Toggle Digit Scanning (Highlighting) |
+| **Right-Click / Long-Press** | Instantly "stamp" the currently highlighted digit |
+
+---
+
+## Visual Guide
+
+- **Clue Cells**: Initial puzzle numbers rendered in **Bold Gold** (RGB: 255, 215, 0).
+- **Manual Entries**: User-placed digits rendered in **White**.
+- **Hinted Digits**: Hinted numbers rendered in **Bold Pink** (RGB: 255, 105, 180).
+- **Scanning Mode**: Grid cells and pencil marks glowing in **Vibrant Light Green** (RGB: 39, 245, 63).
+- **Conflict**: Conflicting cells flash **Red** (RGB: 255, 0, 0).
+- **Hint Pulse**: Hinted cell background flashes **Light Yellow** (RGB: 255, 255, 100).
 
 ---
 
@@ -74,11 +93,36 @@ A high-performance Golang toolkit for extracting Sudoku grids from screenshots a
 - **Engine**: Go 1.23.0
 - **GUI Framework**: Fyne v2.7.3
 - **External Dependency**: [Gemini CLI](https://github.com/google/gemini-cli) (required for the **IMPORT** feature).
-- **Architecture**: 20-rectangle grid layout for artifact-free rendering and debounced resizing.
+- **Architecture**: 
+  - 20-rectangle grid layout for artifact-free rendering.
+  - Debounced resizing (100ms) for smooth UI transitions.
+  - MRV-based recursive backtracking solver with state propagation.
 - **Deployment**: 
   - Windows (`SudokuHelper.exe`)
   - Linux (`SudokuHelper`)
   - Android (`SudokuHelper.apk`)
+
+## Build Instructions
+
+### Requirements
+- **Go 1.23+**
+- **Fyne-cross** (for multi-platform/Android builds)
+- **Gemini CLI** (for high-accuracy image extraction)
+
+### Linux (Native/WSL)
+```bash
+go build -o SudokuHelper .
+```
+
+### Windows (via Fyne-cross)
+```bash
+fyne-cross windows -app-id com.example.sudoku_helper -arch amd64 -name SudokuHelper
+```
+
+### Android (via Fyne-cross)
+```bash
+fyne-cross android -app-id com.example.sudoku_helper -icon Icon.png -name SudokuHelper -arch arm64
+```
 
 ## Usage
 
@@ -102,6 +146,7 @@ Apply manual UI scaling (useful for High-DPI displays):
 - **Right-click on Windows/Linux:** Ensure a cell is selected first if the standard right-click is not responsive, or try a brief long-press.
 - **Android Save Issues:** Use the **OVERWRITE** button when replacing existing files to avoid native SAF limitations.
 - **Gemini Extraction:** Ensure your Gemini CLI is logged in and using the latest Gemini models for the best results.
+- **Windows File Picker Logs:** Harmless Fyne library logs ("Error getting file attributes") may appear in the console; these do not affect functionality.
 
 ---
 *Developed with ❤️ for Sudoku enthusiasts.*

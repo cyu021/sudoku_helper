@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"image/color"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -35,10 +35,11 @@ type SudokuGrid struct {
 }
 
 type GameState struct {
-	Values  [9][9]int     `json:"values"`
-	Locked  [9][9]bool    `json:"locked"`
-	Notes   [9][9][9]bool `json:"notes"`
-	History []GameState   `json:"history,omitempty"`
+	Values       [9][9]int     `json:"values"`
+	Locked       [9][9]bool    `json:"locked"`
+	Notes        [9][9][9]bool `json:"notes"`
+	History      []GameState   `json:"history,omitempty"`
+	TimerSeconds int64         `json:"timer_seconds,omitempty"`
 }
 
 type Cell struct {
@@ -126,13 +127,13 @@ type cellRenderer struct {
 func (r *cellRenderer) Layout(size fyne.Size) {
 	r.bg.Resize(size)
 	r.mainText.Resize(size)
-	
+
 	// Optimization: Only update TextSize if it has changed significantly
 	newMainSize := size.Height * 0.7
 	if r.mainText.TextSize != newMainSize {
 		r.mainText.TextSize = newMainSize
 	}
-	
+
 	r.noteContainer.Resize(size)
 	newNoteSize := size.Height * 0.22
 	for _, t := range r.noteTexts {
@@ -215,7 +216,7 @@ func (r *cellRenderer) Destroy()                     {}
 func (c *Cell) Tapped(ev *fyne.PointEvent) {
 	fmt.Printf("Cell Tapped at %d,%d, InteractionMode: %v, Val: %d\n", c.row, c.col, interactionMode, c.val)
 	c.onSelect(c.row, c.col)
-	
+
 	if c.val > 0 {
 		// Mimic digit button behavior when no cell is selected (Toggle Scanning)
 		// regardless the click mode
@@ -251,7 +252,7 @@ func (c *Cell) SecondaryTapped(ev *fyne.PointEvent) {
 	fmt.Printf("Cell SecondaryTapped at %d,%d, Highlighted Digit: %d, Mode: %v\n", c.row, c.col, highlightedDigit, noteMode)
 	// First select the cell
 	c.onSelect(c.row, c.col)
-	
+
 	// If a digit button is selected (scanning mode), apply it using CURRENT mode
 	if highlightedDigit > 0 && handleInput != nil {
 		handleInput(c.row, c.col, highlightedDigit, false)
@@ -376,7 +377,7 @@ func (b *SudokuBoard) LongTapped(ev *fyne.PointEvent) {
 
 func (b *SudokuBoard) SecondaryTapped(ev *fyne.PointEvent) {
 	fmt.Printf("Board SecondaryTapped at pos: %v, Highlighted Digit: %d, Mode: %v\n", ev.Position, highlightedDigit, noteMode)
-	
+
 	// Calculate cell index based on click position
 	size := b.Size()
 	side := size.Width
@@ -386,10 +387,10 @@ func (b *SudokuBoard) SecondaryTapped(ev *fyne.PointEvent) {
 	cellSize := side / 9.0
 	offsetX := (size.Width - side) / 2.0
 	offsetY := (size.Height - side) / 2.0
-	
+
 	col := int((ev.Position.X - offsetX) / cellSize)
 	row := int((ev.Position.Y - offsetY) / cellSize)
-	
+
 	if row >= 0 && row < 9 && col >= 0 && col < 9 {
 		fmt.Printf("Board-level Right-click detected for cell %d,%d\n", row, col)
 		b.cells[row][col].SecondaryTapped(ev)
@@ -487,9 +488,9 @@ func (r *boardRenderer) performLayout(size fyne.Size) {
 	if size.Height < size.Width {
 		side = size.Height
 	}
-	
+
 	// Float32 for perfect pixel alignment
-	cellSize := side / 9.0 
+	cellSize := side / 9.0
 	offsetX := (size.Width - side) / 2.0
 	offsetY := (size.Height - side) / 2.0
 
@@ -509,16 +510,16 @@ func (r *boardRenderer) performLayout(size fyne.Size) {
 		if i%3 == 0 {
 			thickness = 2.0
 		}
-		
+
 		// Horizontal lines
 		r.hLines[i].Resize(fyne.NewSize(side, thickness))
 		r.hLines[i].Move(fyne.NewPos(offsetX, offsetY+pos-(thickness/2.0)))
-		
+
 		// Vertical lines
 		r.vLines[i].Resize(fyne.NewSize(thickness, side))
 		r.vLines[i].Move(fyne.NewPos(offsetX+pos-(thickness/2.0), offsetY))
 	}
-	
+
 	r.board.Refresh()
 }
 
@@ -614,7 +615,6 @@ func undo() {
 	updateButtonStates()
 	updateDigitHighlights(highlightedDigit)
 }
-
 
 func main() {
 	fmt.Println("Sudoku Helper starting...")
@@ -780,7 +780,6 @@ func main() {
 	timerRunning := false
 	timerBinding = binding.NewString()
 	timerBinding.Set("00:00:00")
-
 
 	updateTimerDisplay := func() {
 		dur := totalElapsed
@@ -966,12 +965,12 @@ func main() {
 		iconImg := canvas.NewImageFromResource(resourceGameOverIconPng)
 		iconImg.SetMinSize(fyne.NewSize(64, 64))
 		iconImg.FillMode = canvas.ImageFillContain
-		
+
 		content := container.NewVBox(
 			container.NewCenter(iconImg),
 			widget.NewLabelWithStyle(msg, fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 		)
-		
+
 		d := dialog.NewCustom("GAME OVER", "CLOSE", content, myWindow)
 		d.Show()
 	}
@@ -980,14 +979,19 @@ func main() {
 		iconImg := canvas.NewImageFromResource(resourcePuzzleSolveIconPng)
 		iconImg.SetMinSize(fyne.NewSize(128, 128))
 		iconImg.FillMode = canvas.ImageFillContain
-		
+
 		content := container.NewVBox(
 			container.NewCenter(iconImg),
 			widget.NewLabelWithStyle("CONGRATULATIONS!", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 			widget.NewLabelWithStyle("Puzzle Solved! Time: "+finalTime, fyne.TextAlignCenter, fyne.TextStyle{}),
 		)
-		
+
 		d := dialog.NewCustom("VICTORY", "CLOSE", content, myWindow)
+		d.SetOnClosed(func() {
+			totalElapsed = 0
+			timerRunning = false
+			fyne.Do(updateTimerDisplay)
+		})
 		d.Show()
 	}
 
@@ -1464,6 +1468,14 @@ func main() {
 			}
 		}
 		state.History = history // Include undo stack
+		
+		// Capture current elapsed time
+		currElapsed := totalElapsed
+		if timerRunning {
+			currElapsed += time.Since(startTime)
+		}
+		state.TimerSeconds = int64(currElapsed.Seconds())
+
 		data, _ := json.Marshal(state)
 
 		handleWriter := func(writer fyne.URIWriteCloser, err error) {
@@ -1499,10 +1511,10 @@ func main() {
 					})
 					for i := len(parts) - 1; i >= 0; i-- {
 						p := parts[i]
-						if p == "" || p == "content" || p == "primary" || 
-						   strings.HasPrefix(p, "document") || isNumeric(p) || 
-						   strings.Contains(p, "android.providers") ||
-						   strings.Contains(p, "google.android") {
+						if p == "" || p == "content" || p == "primary" ||
+							strings.HasPrefix(p, "document") || isNumeric(p) ||
+							strings.Contains(p, "android.providers") ||
+							strings.Contains(p, "google.android") {
 							continue
 						}
 						extractedName = p
@@ -1536,7 +1548,7 @@ func main() {
 							}
 							uri := reader.URI()
 							reader.Close() // Close reader to free up the file for writing
-							
+
 							writer, err := storage.Writer(uri)
 							if err != nil {
 								statusBinding.Set("Error opening for write: " + err.Error())
@@ -1608,6 +1620,9 @@ func main() {
 					}
 				}
 				history = state.History // Restore undo stack
+				totalElapsed = time.Duration(state.TimerSeconds) * time.Second
+				timerRunning = false
+				fyne.Do(updateTimerDisplay)
 
 				// Robust filename extraction for Android
 				var bestName string
@@ -1622,10 +1637,10 @@ func main() {
 						})
 						for i := len(parts) - 1; i >= 0; i-- {
 							p := parts[i]
-							if p == "" || p == "content" || p == "primary" || 
-							   strings.HasPrefix(p, "document") || isNumeric(p) || 
-							   strings.Contains(p, "android.providers") ||
-							   strings.Contains(p, "google.android") {
+							if p == "" || p == "content" || p == "primary" ||
+								strings.HasPrefix(p, "document") || isNumeric(p) ||
+								strings.Contains(p, "android.providers") ||
+								strings.Contains(p, "google.android") {
 								continue
 							}
 							bestName = p
@@ -1780,7 +1795,7 @@ func main() {
 		// Set a large minimum size for the scroll area to force the dialog to expand
 		winSize := myWindow.Canvas().Size()
 		scroll.SetMinSize(fyne.NewSize(winSize.Width*0.9, winSize.Height*0.8))
-		
+
 		d := dialog.NewCustom("Attribution", "CLOSE", container.NewPadded(scroll), myWindow)
 		d.Show()
 	})
@@ -1870,7 +1885,7 @@ func main() {
 				}
 				return
 			}
-			
+
 			// Otherwise (empty cell selected OR num is 0), set/clear the digit
 			handleInput(selectedR, selectedC, num, false)
 		})
@@ -1912,7 +1927,7 @@ func main() {
 			}
 			return
 		}
-		
+
 		// If a cell IS selected, handle navigation and editing
 		if k.Name == fyne.KeyLeft {
 			if selectedC > 0 {
@@ -1961,7 +1976,7 @@ func main() {
 	topPanelWithTheme := container.NewThemeOverride(topPanel, compact)
 
 	content := container.NewBorder(topPanelWithTheme, nil, nil, nil, board)
-	
+
 	// Wrap everything in a stack with a background tapper to clear selection when clicking outside
 	mainContent := container.NewStack(
 		NewBackgroundTapper(func() { onSelect(-1, -1) }),
